@@ -13,6 +13,7 @@ import * as customers from './pages/customers.js';
 import * as fulfillment from './pages/fulfillment.js';
 import * as reconcile from './pages/reconcile.js';
 import * as adanalysis from './pages/adanalysis.js';
+import * as advisor from './pages/advisor.js';
 
 /* ---------- 공통 도구 ---------- */
 export const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -120,6 +121,7 @@ const IC = {
   customers: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>',
   fulfillment: '<path d="M2 7h12v10H2zM14 10h4l3 3v4h-7"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
   products: '<path d="M9 3h6v5l4 11a1.5 1.5 0 0 1-1.4 2H6.4A1.5 1.5 0 0 1 5 19L9 8z"/>',
+  advisor: '<path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
   adan: '<path d="M3 20h18"/><path d="M5 16l4-5 4 3 6-8"/><circle cx="19" cy="6" r="1.5"/>',
   ads: '<path d="M3 11v2a1 1 0 0 0 1 1h3l6 5V5L7 10H4a1 1 0 0 0-1 1z"/><path d="M17 8a5 5 0 0 1 0 8"/>',
   rules: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
@@ -130,6 +132,7 @@ const IC = {
 const PAGES = [
   { grp: '운영' },
   { id: 'home', label: '홈', mod: home },
+  { id: 'advisor', label: 'AI 참모', mod: advisor, icon: 'advisor' },
   { id: 'cs', label: 'CS 문의', mod: cs, badge: 'cs' },
   { grp: '주문관리' },
   { id: 'orders', label: '전체 주문 조회', mod: orders, icon: 'orders' },

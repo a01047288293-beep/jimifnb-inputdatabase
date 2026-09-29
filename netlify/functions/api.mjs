@@ -11,6 +11,8 @@ import { runSync } from '../lib/sync.mjs';
 import { getJSON, setJSON } from '../lib/store.mjs';
 import { draftReply, aiConfigured, adCommentary } from '../lib/ai.mjs';
 import * as AD from '../lib/adinsights.mjs';
+import { adAnalysis } from '../lib/reports.mjs';
+import * as ADV from '../lib/advisor.mjs';
 import { blankProduct, calc } from '../../public/lib/margin.js';
 import { DEMO_PRODUCTS } from '../lib/demo.mjs';
 
@@ -297,32 +299,6 @@ route('GET', '/api/ads', async (req, s, url) => {
   return json({ from, to, campaigns: list, errors: ads.errors, modes: ads.modes, products: products.map(p => ({ id: p.id, name: p.name, beRoas: calc(p).beRoas })) });
 });
 /** 광고 분석: 개요·캠페인·소재·퍼널·제품 손익 + 코멘트 */
-async function adAnalysis(from, to) {
-  const days = dateRange(from, [to, kstDate()].sort()[0]);
-  const n = dateRange(from, to).length;
-  const pFrom = addDays(from, -n), pTo = addDays(from, -1);
-  const settings = await data.getSettings();
-  const products = await data.listProducts();
-  const idx = A.productIndex(products);
-  // 매체 성과·이전 기간·소재·주문을 한꺼번에 동시에 받음
-  let orderError = null;
-  const [ads, prevAds, cr, [orders, prevOrders]] = await Promise.all([
-    data.allAds(from, to),
-    data.allAds(pFrom, pTo, { rowsOnly: true }).catch(() => ({ rows: [] })),
-    data.allCreatives(from, to),
-    Promise.all([data.ordersForStats(from, to), data.ordersForStats(pFrom, pTo)]).catch(e => { orderError = e.message; return [[], []]; })
-  ]);
-  const errors = [...ads.errors, ...cr.errors.filter(e => !ads.errors.some(x => x.platform === e.platform))];
-  if (orderError) errors.push({ platform: 'cafe24', message: orderError });
-  const platforms = data.PLATFORMS.filter(p => ads.modes[p] !== 'off');
-  const summary = A.campaignSummary(ads.campaigns, ads.rows, settings.campaignLinks || {}, products);
-  const ov = AD.overview({ days, rows: ads.rows, prevRows: prevAds.rows, orders, prevOrders, platforms });
-  const camps = AD.campaignAnalysis(summary, ads.rows, days);
-  const creatives = AD.creativeAnalysis(cr.rows, cr.info, cr.reach, summary, days);
-  const fun = AD.funnelAnalysis(ads.rows, prevAds.rows, platforms);
-  const pl = AD.productPL({ products, idx, orders, campaigns: summary });
-  return { from, to, prevFrom: pFrom, prevTo: pTo, days, platforms, modes: ads.modes, errors, ov, camps, creatives, fun, pl, headline: AD.headline(ov, camps, creatives, fun) };
-}
 route('GET', '/api/ads/analysis', async (req, s, url) => {
   const { from, to } = range(url, 92, 14);
   const r = await adAnalysis(from, to);
@@ -339,6 +315,19 @@ route('POST', '/api/ads/ai-comment', async (req, s) => {
   await setJSON(`cache/adai/${from}_${to}`, out);
   return json(out);
 });
+/* ---------- AI 참모 ---------- */
+route('GET', '/api/advisor', async (req, s) => json({ configured: ADV.advisorConfigured(), ...(await ADV.loadThread(who(s))), modes: await data.modes() }));
+route('POST', '/api/advisor/step', async (req, s) => {
+  const b = await body(req);
+  const r = await ADV.step(b.messages, { who: who(s) });
+  const ids = [...(Array.isArray(b.proposalIds) ? b.proposalIds.map(String) : []), ...r.proposals.map(p => p.id)];
+  await ADV.saveThread(who(s), r.messages, ids);
+  return json(r);
+});
+route('POST', '/api/advisor/reset', async (req, s) => { await ADV.clearThread(who(s)); return json({ ok: true }); });
+route('POST', '/api/advisor/proposals/:id/run', async (req, s, url, p) => json(await ADV.runProposal(p.id, who(s))));
+route('POST', '/api/advisor/proposals/:id/dismiss', async (req, s, url, p) => json(await ADV.dismissProposal(p.id, who(s))));
+
 route('POST', '/api/ads/status', async (req, s) => {
   const b = await body(req);
   await data.setCampaignStatus(String(b.platform), String(b.id), Boolean(b.on), who(s), '직접 변경');

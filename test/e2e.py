@@ -197,6 +197,41 @@ with sync_playwright() as p:
         page.screenshot(path=f"{OUT}/07b-ad-analysis.png", full_page=True)
     run(page, "광고 분석 탭·코멘트", adanalysis)
 
+    def advisor():
+        page.click("a[data-page=advisor]")
+        expect(page.locator("h1")).to_contain_text("AI 참모")
+        expect(page.locator(".box")).to_contain_text("ANTHROPIC_API_KEY")
+        # 키가 있는 상황을 화면에서 흉내 (서버 응답 대체)
+        import json as _j
+        prop = {"id": "p1", "type": "budget", "platform": "meta", "key": "meta:m-1001", "name": "[불고기] 전환_리타게팅", "currentBudget": 50000, "newBudget": 60000, "reason": "ROAS 4.9배로 손익분기 2.97배의 1.6배, 예산 소진 중", "state": "open", "at": 0}
+        steps = [
+          {"done": False, "activity": ["get_ad_report", "propose_action"], "proposals": [prop], "messages": [
+            {"role": "user", "content": "광고비 어디에 더 쓸까?"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "get_ad_report", "input": {"from": "2026-09-16", "to": "2026-09-29"}}, {"type": "tool_use", "id": "t2", "name": "propose_action", "input": {}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "{}"}, {"type": "tool_result", "tool_use_id": "t2", "content": _j.dumps({"제안": prop}, ensure_ascii=False)}]}]},
+        ]
+        final_text = "**불고기 리타게팅 예산을 20% 늘리는 것을 권합니다.**\n- ROAS 4.87배, 손익분기 2.97배\n- 예산을 거의 다 쓰는 중\n\n할 일\n- 아래 제안 카드에서 실행"
+        def step(route):
+            if steps:
+                route.fulfill(json=steps.pop(0))
+            else:
+                body = _j.loads(route.request.post_data)
+                route.fulfill(json={"done": True, "activity": [], "proposals": [], "text": "", "messages": body["messages"] + [{"role": "assistant", "content": [{"type": "text", "text": final_text}]}]})
+        page.route("**/api/advisor", lambda r: r.fulfill(json={"configured": True, "messages": [], "proposals": []}))
+        page.route("**/api/advisor/step", step)
+        page.route("**/api/advisor/proposals/p1/run", lambda r: r.fulfill(json={**prop, "state": "done"}))
+        page.goto(B + "/#/advisor"); page.reload()
+        expect(page.locator(".adv-sugs button").first).to_be_visible()
+        page.fill("#adv-q", "광고비 어디에 더 쓸까?")
+        page.keyboard.press("Enter")
+        expect(page.locator(".msg.ai").last).to_contain_text("20% 늘리는")
+        expect(page.locator(".adv-card")).to_contain_text("60,000원")
+        page.click("[data-run=p1]"); page.click("#cb-ok")
+        expect(page.locator(".adv-card")).to_contain_text("실행됨")
+        page.screenshot(path=f"{OUT}/07c-advisor.png", full_page=True)
+        page.unroute("**/api/advisor"); page.unroute("**/api/advisor/step"); page.unroute("**/api/advisor/proposals/p1/run")
+    run(page, "AI 참모 화면·제안 실행", advisor)
+
     def rules():
         page.click("a[data-page=rules]")
         expect(page.locator("h1")).to_contain_text("자동 규칙")

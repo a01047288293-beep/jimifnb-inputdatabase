@@ -38,7 +38,7 @@ export async function render(main, { query }) {
         ${m.googleKeys ? `<div><a class="btn ${m.google === 'live' ? '' : 'primary'}" href="/api/google/connect">${m.google === 'live' ? '다시 연결' : '구글 Ads 연결하기'}</a>${m.google === 'live' ? ' <button class="btn" data-test="google">연결 확인</button> <span class="hint" id="t-google"></span>' : ''}</div>` : ''}
         ${envList('google')}<div class="hint">OAuth 클라이언트의 승인된 리디렉션 URI: <code>${esc(s.googleRedirectUri || location.origin + '/api/google/callback')}</code><br>관리자(MCC) 계정을 거쳐 접근하면 <code>GOOGLE_ADS_LOGIN_CUSTOMER_ID</code>도 등록</div>`)}
       ${card('틱톡 광고', m.tiktok, `<div>${m.tiktok === 'live' ? '연결됨' : '틱톡 비즈니스 개발자 앱의 액세스 토큰과 광고주 ID가 필요합니다.'}</div>${envList('tiktok')}`)}
-      ${card('AI 답변 초안', s.ai ? 'live' : 'off', `<div>${s.ai ? '사용 가능' : '선택 기능입니다. 등록하면 CS 문의에 답변 초안 버튼이 생깁니다.'}</div>${envList('ai')}`)}
+      ${card('AI (참모·CS 초안·광고 코멘트)', s.ai ? 'live' : 'off', `<div>${s.ai ? '사용 가능. 왼쪽 메뉴 <a href="#/advisor">AI 참모</a>에서 매출·광고 의사결정을 물어보세요.' : '등록하면 AI 참모, CS 답변 초안, 광고 분석 AI 코멘트가 켜집니다.'}</div>${envList('ai')}<div class="hint">모델을 바꾸려면 <code>ANTHROPIC_ADVISOR_MODEL</code> (기본 claude-sonnet-5-5)</div>`)}
       <section class="box"><div class="box-h"><h2>자동 수집</h2>${s.sync ? (s.sync.errors.length ? '<span class="pill bad">오류 있음</span>' : '<span class="pill good">정상</span>') : ''}</div>
         <div>${s.sync ? `마지막 실행 ${esc(fmtTime(s.sync.at))} · ${s.sync.ms}ms` : '아직 실행 기록이 없습니다. 배포 후 15분마다 자동 실행됩니다.'}</div>
         ${s.sync?.errors?.length ? `<div class="err"><ul>${s.sync.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : ''}
