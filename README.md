@@ -60,13 +60,13 @@ Netlify에 배포하며, 서버 기능은 Netlify Functions, 데이터 저장은
 선택 환경변수: `CAFE24_MALL_ID`·`SHOP_URL` (다른 몰에 쓸 때만), `CAFE24_CS_BOARDS` (문의 게시판 번호, 쉼표 구분. 비우면 이름에 "문의·Q&A"가 들어간 게시판), `CAFE24_CS_REPLY_MODE` (`reply` 답글 / `comment` 댓글).
 
 ## 3. 광고 매체 연결
+| 매체 | Netlify 환경변수 | 받는 곳 |
+|---|---|---|
+| 메타 | `META_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID` | 비즈니스 설정 → 시스템 사용자 → 토큰 생성 (권한 `ads_read`, `ads_management`, `business_management`, 만료 없음), 광고 계정 ID(숫자만) |
+| 구글 | `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_CUSTOMER_ID` (+MCC 경유 시 `GOOGLE_ADS_LOGIN_CUSTOMER_ID`) | Google Cloud 콘솔 → Google Ads API 사용 설정 → OAuth 클라이언트(웹 애플리케이션). 등록 후 설정·연동의 **구글 Ads 연결하기** 버튼으로 승인 (갱신 토큰은 운영실이 저장) |
+| 틱톡 | `TIKTOK_ACCESS_TOKEN`, `TIKTOK_ADVERTISER_ID` | 틱톡 비즈니스 개발자 앱 |
 
-| 매체 | 환경변수 | 준비물 |
-| --- | --- | --- |
-| 메타 | `META_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID` | 비즈니스 관리자 → 시스템 사용자 → 토큰 생성 (권한 `ads_read`, `ads_management`), 광고 계정 ID |
-| 구글 | `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_CUSTOMER_ID` (+ 관리자 계정 경유 시 `GOOGLE_ADS_LOGIN_CUSTOMER_ID`) | 개발자 토큰은 실제 계정에 쓰려면 Explorer 이상 승인 필요. OAuth 클라이언트와 갱신 토큰 |
-| 틱톡 | `TIKTOK_ACCESS_TOKEN`, `TIKTOK_ADVERTISER_ID` | 틱톡 비즈니스 개발자 앱 승인 후 발급 |
-
+구글은 2026-09-10부터 접근 권한을 개발자 토큰이 아니라 Cloud 프로젝트의 액세스 수준(테스트 → 탐색기 → 기본)으로 판단합니다. 실제 광고 계정을 읽으려면 Cloud 콘솔 Google Ads API 페이지에서 **탐색기(Explorer) 이상**을 신청하세요. `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_REFRESH_TOKEN` 은 넣으면 쓰고 없어도 됩니다.
 API 버전은 기본값(메타 v26.0, 구글 v25, 틱톡 v1.3)을 쓰며 `META_API_VERSION`, `GOOGLE_ADS_API_VERSION` 으로 바꿀 수 있습니다.
 
 ### 광고 분석 화면이 제대로 보이려면

@@ -4,7 +4,7 @@ import { fmtTime } from './home.js';
 const ENV = {
   cafe24: ['CAFE24_CLIENT_ID', 'CAFE24_CLIENT_SECRET'],
   meta: ['META_ACCESS_TOKEN', 'META_AD_ACCOUNT_ID'],
-  google: ['GOOGLE_ADS_DEVELOPER_TOKEN', 'GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_CUSTOMER_ID'],
+  google: ['GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_CUSTOMER_ID'],
   tiktok: ['TIKTOK_ACCESS_TOKEN', 'TIKTOK_ADVERTISER_ID'],
   ai: ['ANTHROPIC_API_KEY']
 };
@@ -13,6 +13,8 @@ const MSG = { ok: ['info', '카페24 연결이 완료되었습니다.'], fail: [
 export async function render(main, { query }) {
   const s = await api('/api/status');
   const m = s.modes; const st = s.settings;
+  const GMSG = { ok: ['info', '구글 Ads 연결이 완료되었습니다. 아래 "연결 확인"을 눌러보세요.'], fail: ['bad', '구글 Ads 연결에 실패했습니다.'], state: ['bad', '연결 요청이 만료되었습니다. 다시 시도하세요.'], denied: ['bad', '구글에서 권한 승인이 취소되었습니다.'] };
+  const gmsg = GMSG[query.get('google')];
   const msg = MSG[query.get('cafe24')];
   const envList = k => `<div class="hint">Netlify 환경변수: ${ENV[k].map(e => `<code>${e}</code>`).join(', ')}</div>`;
   const card = (title, mode, body) => `<section class="box"><div class="box-h"><h2>${title}</h2>${srcTag(mode)}</div>${body}</section>`;
@@ -22,6 +24,7 @@ export async function render(main, { query }) {
   <div class="page-head"><h1>설정·연동</h1></div>
   <div class="stack">
     ${msg ? `<div class="notice ${msg[0]}">${msg[1]}${s.cafe24Connect && !s.cafe24Connect.ok && query.get('cafe24') !== 'ok' ? `<div style="margin-top:6px"><b>사유:</b> ${esc(s.cafe24Connect.message || '알 수 없음')}</div><div class="hint">연결에 쓴 Redirect URI: <code>${esc(s.cafe24Connect.redirectUri)}</code></div>` : ''}</div>` : ''}
+    ${gmsg ? `<div class="notice ${gmsg[0]}">${gmsg[1]}${s.googleConnect && !s.googleConnect.ok && query.get('google') !== 'ok' ? `<div style="margin-top:6px"><b>사유:</b> ${esc(s.googleConnect.message || '알 수 없음')}</div><div class="hint">연결에 쓴 리디렉션 URI: <code>${esc(s.googleConnect.redirectUri)}</code></div>` : ''}</div>` : ''}
     ${(m.cafe24 !== 'live' || ['meta', 'google', 'tiktok'].some(p => m[p] !== 'live')) ? '<div class="notice">"데모"로 표시된 영역은 연습용 데이터입니다. 아래 환경변수를 Netlify에 등록하고 다시 배포하면 해당 영역이 실제 데이터로 바뀝니다. 키 값은 채팅이나 문서에 붙여넣지 말고 Netlify 화면에만 입력하세요.</div>' : ''}
     <div class="cols">
       ${card('카페24 쇼핑몰', m.cafe24, `
@@ -29,8 +32,11 @@ export async function render(main, { query }) {
         <div>${m.cafe24 === 'live' ? '연결됨. ' + tokenLine : m.cafe24Keys ? '키가 등록되었습니다. 아래 버튼으로 쇼핑몰 권한을 승인하면 연결이 끝납니다.' : '카페24 개발자센터에서 앱을 만들고 키를 등록하세요.'}</div>
         ${m.cafe24Keys ? `<div><a class="btn ${m.cafe24 === 'live' ? '' : 'primary'}" href="/api/cafe24/connect">${m.cafe24 === 'live' ? '다시 연결' : '카페24 연결하기'}</a></div>` : ''}
         ${envList('cafe24')}<div class="hint">앱의 Redirect URI: <code>${esc(s.cafe24RedirectUri || location.origin + '/api/cafe24/callback')}</code></div>`)}
-      ${card('메타 광고', m.meta, `<div>${m.meta === 'live' ? '연결됨' : '시스템 사용자 토큰과 광고 계정 ID가 필요합니다.'}</div>${envList('meta')}`)}
-      ${card('구글 Ads', m.google, `<div>${m.google === 'live' ? '연결됨' : '개발자 토큰(실계정용 승인 필요)과 OAuth 갱신 토큰이 필요합니다.'}</div>${envList('google')}<div class="hint">관리자(MCC) 계정을 거치면 GOOGLE_ADS_LOGIN_CUSTOMER_ID도 등록</div>`)}
+      ${card('메타 광고', m.meta, `<div>${m.meta === 'live' ? '키 등록됨. 아래 버튼으로 실제로 불러와지는지 확인하세요.' : '시스템 사용자 토큰과 광고 계정 ID가 필요합니다.'}</div>
+        ${m.meta === 'live' ? '<div><button class="btn" data-test="meta">연결 확인</button> <span class="hint" id="t-meta"></span></div>' : ''}${envList('meta')}`)}
+      ${card('구글 Ads', m.google, `<div>${m.google === 'live' ? '연결됨.' : m.googleKeys ? '키가 등록되었습니다. 아래 버튼으로 구글 계정 권한을 승인하면 연결이 끝납니다.' : 'Google Cloud의 OAuth 클라이언트 ID·비밀번호와 광고 계정 번호가 필요합니다.'}</div>
+        ${m.googleKeys ? `<div><a class="btn ${m.google === 'live' ? '' : 'primary'}" href="/api/google/connect">${m.google === 'live' ? '다시 연결' : '구글 Ads 연결하기'}</a>${m.google === 'live' ? ' <button class="btn" data-test="google">연결 확인</button> <span class="hint" id="t-google"></span>' : ''}</div>` : ''}
+        ${envList('google')}<div class="hint">OAuth 클라이언트의 승인된 리디렉션 URI: <code>${esc(s.googleRedirectUri || location.origin + '/api/google/callback')}</code><br>관리자(MCC) 계정을 거쳐 접근하면 <code>GOOGLE_ADS_LOGIN_CUSTOMER_ID</code>도 등록</div>`)}
       ${card('틱톡 광고', m.tiktok, `<div>${m.tiktok === 'live' ? '연결됨' : '틱톡 비즈니스 개발자 앱의 액세스 토큰과 광고주 ID가 필요합니다.'}</div>${envList('tiktok')}`)}
       ${card('AI 답변 초안', s.ai ? 'live' : 'off', `<div>${s.ai ? '사용 가능' : '선택 기능입니다. 등록하면 CS 문의에 답변 초안 버튼이 생깁니다.'}</div>${envList('ai')}`)}
       <section class="box"><div class="box-h"><h2>자동 수집</h2>${s.sync ? (s.sync.errors.length ? '<span class="pill bad">오류 있음</span>' : '<span class="pill good">정상</span>') : ''}</div>
@@ -55,6 +61,13 @@ export async function render(main, { query }) {
       <div><button class="btn" id="demo-ex">예시 제품 불러오기</button></div></section>` : ''}
   </div>`;
 
+  main.querySelectorAll('[data-test]').forEach(b => b.onclick = async () => {
+    const out = main.querySelector('#t-' + b.dataset.test);
+    b.disabled = true; out.textContent = '확인 중…';
+    try { const r = await api('/api/ads/test', { method: 'POST', body: { platform: b.dataset.test } }); out.innerHTML = `<span class="pill good">성공</span> 캠페인 ${r.count}개 (켜짐 ${r.on}개)${r.names.length ? ' · ' + esc(r.names.join(', ')) : ''}`; }
+    catch (e) { out.innerHTML = `<span class="pill bad">실패</span> ${esc(e.message)}`; }
+    b.disabled = false;
+  });
   main.querySelector('#sync-now').onclick = async e => {
     const b = e.target; b.disabled = true; b.textContent = '수집 중…';
     try { const r = await api('/api/sync', { method: 'POST' }); toast(r.errors.length ? `완료, 오류 ${r.errors.length}건` : '수집 완료', Boolean(r.errors.length)); render(main, { query: new URLSearchParams() }); }

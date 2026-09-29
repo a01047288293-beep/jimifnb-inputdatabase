@@ -3,6 +3,7 @@ import { json, HttpError, kstDate, addDays, isYmd, dateRange, num } from '../lib
 import { login, logoutCookie, requireSession, sessionOf, signState, verifyState } from '../lib/auth.mjs';
 import * as data from '../lib/data.mjs';
 import * as C from '../lib/cafe24.mjs';
+import * as G from '../lib/google.mjs';
 import * as R from '../lib/rules.mjs';
 import * as A from '../lib/analytics.mjs';
 import * as I from '../lib/insights.mjs';
@@ -46,7 +47,7 @@ route('GET', '/api/me', async (req) => {
 /* ---------- 상태·설정 ---------- */
 route('GET', '/api/status', async () => json({
   modes: await data.modes(), settings: await data.getSettings(), sync: await getJSON('status/sync'),
-  cafe24Token: await C.tokenInfo(), cafe24Connect: await getJSON('status/cafe24-connect'), cafe24RedirectUri: process.env.CAFE24_REDIRECT_URI || null, ai: aiConfigured(), today: kstDate(), shop: { url: C.SHOP_URL(), mallId: C.MALL_ID() }
+  cafe24Token: await C.tokenInfo(), cafe24Connect: await getJSON('status/cafe24-connect'), cafe24RedirectUri: process.env.CAFE24_REDIRECT_URI || null, googleConnect: await getJSON('status/google-connect'), googleRedirectUri: process.env.GOOGLE_ADS_REDIRECT_URI || null, ai: aiConfigured(), today: kstDate(), shop: { url: C.SHOP_URL(), mallId: C.MALL_ID() }
 }));
 route('PUT', '/api/settings', async (req, s) => json(await data.putSettings(await body(req), who(s))));
 route('POST', '/api/sync', async () => json(await runSync('manual')));
@@ -386,6 +387,39 @@ route('GET', '/api/cafe24/callback', async (req, s, url) => {
     return back('ok');
   } catch (e) { console.error(e); return fail('fail', e.message); }
 }, { public: true });
+
+/* ---------- 구글 연결 (갱신 토큰을 운영실이 직접 받아 저장) ---------- */
+route('GET', '/api/google/connect', async (req) => {
+  if (!G.googleKeysSet()) throw new HttpError(400, 'GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET, GOOGLE_ADS_CUSTOMER_ID 환경변수를 먼저 등록하세요.');
+  const origin = new URL(req.url).origin;
+  return new Response(null, { status: 302, headers: { location: G.googleAuthorizeUrl(G.googleRedirectUri(origin), signState({ k: 'google' })) } });
+});
+route('GET', '/api/google/callback', async (req, s, url) => {
+  const origin = url.origin;
+  const redirectUri = G.googleRedirectUri(origin);
+  const back = q => new Response(null, { status: 302, headers: { location: `${origin}/#/settings?google=${q}` } });
+  const fail = async (q, message) => { await setJSON('status/google-connect', { at: new Date().toISOString(), ok: false, message: String(message || '').slice(0, 400), redirectUri }); return back(q); };
+  if (url.searchParams.get('error')) return fail('fail', `구글 응답: ${url.searchParams.get('error')}`);
+  const st = verifyState(url.searchParams.get('state'));
+  if (!st || st.k !== 'google') return fail('state', '연결 요청 확인값(state)이 맞지 않습니다. 다시 시도하세요.');
+  const code = url.searchParams.get('code');
+  if (!code) return fail('denied', '구글에서 인증 코드를 받지 못했습니다.');
+  try {
+    await G.googleExchange(code, redirectUri);
+    await setJSON('status/google-connect', { at: new Date().toISOString(), ok: true, message: '', redirectUri });
+    await data.addLog({ who: '관리자', kind: '연동', target: '구글 Ads', detail: '연결 완료' });
+    return back('ok');
+  } catch (e) { console.error(e); return fail('fail', e.message); }
+}, { public: true });
+/** 광고 매체 연결 확인: 캠페인 목록을 실제로 받아봄 */
+route('POST', '/api/ads/test', async (req) => {
+  const b = await body(req);
+  const p = String(b.platform || '');
+  if (!data.PLATFORMS.includes(p)) throw new HttpError(400, '알 수 없는 매체입니다.');
+  if ((await data.mode(p)) !== 'live') throw new HttpError(409, '아직 키가 모두 등록되지 않았습니다.');
+  const list = await data.campaigns(p);
+  return json({ ok: true, count: list.length, on: list.filter(c => c.status === 'on').length, names: list.slice(0, 5).map(c => c.name) });
+});
 
 const EXAMPLES = [
   { name: '[예시] 한우 불고기 양념육 500g', stage: 'review', category: '양념육', cafe24ProductNos: [101],

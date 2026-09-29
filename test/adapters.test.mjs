@@ -230,3 +230,25 @@ test('카페24: 결제금액에 선불금·적립금 포함, 환불 변환·조�
   const list = await C.fetchRefunds('2026-09-23', '2026-09-29');
   assert.equal(list.length, 1, '환불 완료만'); assert.equal(list[0].amount, 92600);
 });
+
+test('구글: 운영실에서 직접 연결(갱신 토큰 저장), 개발자 토큰 없이 호출', async () => {
+  const saved = { dev: process.env.GOOGLE_ADS_DEVELOPER_TOKEN, ref: process.env.GOOGLE_ADS_REFRESH_TOKEN };
+  delete process.env.GOOGLE_ADS_DEVELOPER_TOKEN; delete process.env.GOOGLE_ADS_REFRESH_TOKEN;
+  try {
+    assert.equal(G.googleKeysSet(), true);
+    const u = new URL(G.googleAuthorizeUrl('https://x.com/api/google/callback', 'st'));
+    assert.equal(u.searchParams.get('access_type'), 'offline'); assert.equal(u.searchParams.get('scope'), 'https://www.googleapis.com/auth/adwords');
+    let tokenBody = '';
+    handlers.unshift({ match: 'oauth2.googleapis.com/token', fn: (url, opt) => { tokenBody = String(opt.body); return tokenBody.includes('authorization_code') ? { access_token: 'ga', refresh_token: 'stored-ref', expires_in: 3600 } : { access_token: 'gb', expires_in: 3600 }; } });
+    await G.googleExchange('code1', 'https://x.com/api/google/callback');
+    assert.equal(await G.googleConfigured(), true);
+    let hdr = null;
+    handlers.unshift({ match: 'googleAds:search', fn: (url, opt) => { hdr = opt.headers; return { results: [] }; } });
+    await G.googleCampaigns();
+    assert.equal(hdr['developer-token'], undefined, '개발자 토큰 없으면 헤더 생략');
+    assert.match(hdr.Authorization, /^Bearer /);
+    handlers.shift(); handlers.shift();
+  } finally {
+    process.env.GOOGLE_ADS_DEVELOPER_TOKEN = saved.dev; process.env.GOOGLE_ADS_REFRESH_TOKEN = saved.ref;
+  }
+});

@@ -1,18 +1,42 @@
 // 구글 Ads API (REST)
 import { httpJson, HttpError, num } from './util.mjs';
+import { getJSON, setJSON } from './store.mjs';
+
+const OAUTH_KEY = 'secret/google-oauth';
 
 function env() {
   return {
-    dev: process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
-    clientId: process.env.GOOGLE_ADS_CLIENT_ID || '',
-    secret: process.env.GOOGLE_ADS_CLIENT_SECRET || '',
+    dev: String(process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '').trim(),
+    clientId: String(process.env.GOOGLE_ADS_CLIENT_ID || '').trim(),
+    secret: String(process.env.GOOGLE_ADS_CLIENT_SECRET || '').trim(),
     refresh: process.env.GOOGLE_ADS_REFRESH_TOKEN || '',
     cid: String(process.env.GOOGLE_ADS_CUSTOMER_ID || '').replace(/-/g, ''),
     login: String(process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || '').replace(/-/g, ''),
     v: process.env.GOOGLE_ADS_API_VERSION || 'v25'
   };
 }
-export function googleConfigured() { const e = env(); return Boolean(e.dev && e.clientId && e.secret && e.refresh && e.cid); }
+/** 2026-09-10부터 구글은 접근 권한을 개발자 토큰이 아닌 Cloud 프로젝트로 판단 → 개발자 토큰은 있으면 보내고 없어도 됨 */
+export function googleKeysSet() { const e = env(); return Boolean(e.clientId && e.secret && e.cid); }
+async function refreshToken() { return env().refresh || (await getJSON(OAUTH_KEY))?.refresh_token || ''; }
+export async function googleConfigured() { return googleKeysSet() && Boolean(await refreshToken()); }
+export const googleRedirectUri = origin => process.env.GOOGLE_ADS_REDIRECT_URI || `${origin}/api/google/callback`;
+export function googleAuthorizeUrl(redirectUri, state) {
+  return 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
+    client_id: env().clientId, redirect_uri: redirectUri, response_type: 'code', scope: 'https://www.googleapis.com/auth/adwords',
+    access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state
+  });
+}
+export async function googleExchange(code, redirectUri) {
+  const e = env();
+  const d = await httpJson('https://oauth2.googleapis.com/token', {
+    method: 'POST', label: '구글 인증', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'authorization_code', code, client_id: e.clientId, client_secret: e.secret, redirect_uri: redirectUri }).toString()
+  });
+  if (!d.refresh_token) throw new HttpError(502, '구글이 갱신 토큰을 주지 않았습니다. myaccount.google.com → 보안 → 서드 파티 연결에서 이 앱 권한을 삭제한 뒤 다시 연결하세요.');
+  await setJSON(OAUTH_KEY, { refresh_token: d.refresh_token, saved_at: Date.now() });
+  cached = { token: d.access_token, exp: Date.now() + num(d.expires_in || 3600) * 1000 };
+  return true;
+}
 
 let cached = { token: null, exp: 0 };
 async function accessToken() {
@@ -20,14 +44,15 @@ async function accessToken() {
   const e = env();
   const d = await httpJson('https://oauth2.googleapis.com/token', {
     method: 'POST', label: '구글 인증', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'refresh_token', client_id: e.clientId, client_secret: e.secret, refresh_token: e.refresh }).toString()
+    body: new URLSearchParams({ grant_type: 'refresh_token', client_id: e.clientId, client_secret: e.secret, refresh_token: await refreshToken() }).toString()
   });
   cached = { token: d.access_token, exp: Date.now() + num(d.expires_in || 3600) * 1000 };
   return cached.token;
 }
 async function headers() {
   const e = env();
-  const h = { Authorization: `Bearer ${await accessToken()}`, 'developer-token': e.dev, 'Content-Type': 'application/json' };
+  const h = { Authorization: `Bearer ${await accessToken()}`, 'Content-Type': 'application/json' };
+  if (e.dev) h['developer-token'] = e.dev;
   if (e.login) h['login-customer-id'] = e.login;
   return h;
 }

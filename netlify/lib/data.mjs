@@ -14,13 +14,14 @@ const demoOn = () => (process.env.DEMO_MODE || 'on').toLowerCase() !== 'off';
 /* ---------- 연동 상태 ---------- */
 export async function mode(source) {
   if (source === 'cafe24') return (await C.cafe24Connected()) ? 'live' : demoOn() ? 'demo' : 'off';
-  const ok = { meta: M.metaConfigured, google: G.googleConfigured, tiktok: T.tiktokConfigured }[source]();
+  const ok = await { meta: M.metaConfigured, google: G.googleConfigured, tiktok: T.tiktokConfigured }[source]();
   return ok ? 'live' : demoOn() ? 'demo' : 'off';
 }
 export async function modes() {
   const out = {};
   for (const s of ['cafe24', ...PLATFORMS]) out[s] = await mode(s);
   out.cafe24Keys = C.cafe24KeysSet();
+  out.googleKeys = G.googleKeysSet();
   return out;
 }
 

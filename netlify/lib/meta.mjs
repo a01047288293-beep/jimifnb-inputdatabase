@@ -3,7 +3,7 @@ import { httpJson, HttpError, num } from './util.mjs';
 
 function env() {
   const acct = String(process.env.META_AD_ACCOUNT_ID || '').replace(/^act_/, '');
-  return { token: process.env.META_ACCESS_TOKEN || '', acct, v: process.env.META_API_VERSION || 'v26.0' };
+  return { token: String(process.env.META_ACCESS_TOKEN || '').trim(), acct: acct.trim(), v: process.env.META_API_VERSION || 'v26.0' };
 }
 export function metaConfigured() { const e = env(); return Boolean(e.token && e.acct); }
 const base = () => `https://graph.facebook.com/${env().v}`;
