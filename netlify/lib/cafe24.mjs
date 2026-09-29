@@ -20,8 +20,9 @@ function env() {
   return {
     // 지미에프앤비 자사몰(www.jimifnb0901.com)의 카페24 몰 ID. 다른 몰에 쓸 때만 환경변수로 바꿈
     mall: process.env.CAFE24_MALL_ID || 'jimifnb0901',
-    clientId: process.env.CAFE24_CLIENT_ID || '',
-    secret: process.env.CAFE24_CLIENT_SECRET || '',
+    // 복사할 때 딸려 온 앞뒤 공백·줄바꿈은 제거
+    clientId: (process.env.CAFE24_CLIENT_ID || '').trim(),
+    secret: (process.env.CAFE24_CLIENT_SECRET || '').trim(),
     version: process.env.CAFE24_API_VERSION || '2026-09-01',
     shopNo: Number(process.env.CAFE24_SHOP_NO || 1)
   };
