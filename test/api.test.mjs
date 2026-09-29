@@ -205,3 +205,20 @@ test('주문관리: 상태별 건수는 기간과 무관, 환불·결제 대조'
   const f = await call('GET', '/api/insights/fulfillment?from=2026-09-01&to=2026-09-29');
   assert.ok(f.json.delayed.every(o => o.status !== 'N21'), '배송대기는 지연에서 제외');
 });
+
+test('광고 분석 API (데모): 개요·캠페인·소재·퍼널·제품 손익·코멘트', async () => {
+  const r = await call('GET', '/api/ads/analysis?from=2026-09-16&to=2026-09-29');
+  assert.equal(r.status, 200);
+  const d = r.json;
+  assert.equal(d.ov.daily.length, 14); assert.equal(d.prevTo, '2026-09-15');
+  assert.ok(Math.abs(d.ov.total.spend - d.ov.byPlatform.reduce((s, p) => s + p.spend, 0)) < 1);
+  assert.ok(d.camps.length >= 5 && d.camps.every(c => Array.isArray(c.comments)));
+  assert.ok(d.creatives.list.length >= 8 && d.creatives.formats.length >= 2);
+  assert.ok(d.creatives.list.some(c => c.comments.some(x => /피로도/.test(x.text))), '피로도 소재 감지');
+  assert.ok(d.fun.total.steps.find(s => s.key === 'landing').partial);
+  assert.ok(d.pl.list.length >= 1 && 'profit' in d.pl.list[0]);
+  assert.ok(d.headline.length >= 3);
+  assert.equal(d.ai, false);
+  assert.equal((await call('POST', '/api/ads/ai-comment', { from: '2026-09-16', to: '2026-09-29' })).status, 409, 'AI 키 없으면 안내');
+  assert.equal((await call('GET', '/api/ads/analysis?from=2026-01-01&to=2026-09-29')).status, 400);
+});

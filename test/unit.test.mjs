@@ -138,3 +138,26 @@ test('운영 분석: 출고 소요·지연·클레임', () => {
   assert.equal(f.claims.find(c => c.type === 'R').count, 1); assert.equal(f.reasons[0].name, '포장 파손');
   assert.equal(f.dailyLead[0].median, 24);
 });
+
+test('광고 분석: 퍼널은 측정하는 매체끼리, 코멘트 규칙', async () => {
+  const AD = await import('../netlify/lib/adinsights.mjs');
+  const rows = [
+    { date: '2026-09-01', platform: 'meta', campaignId: '1', name: 'a', spend: 100000, impressions: 100000, clicks: 1000, landing: 800, views: 600, carts: 120, checkouts: 60, purchases: 30, revenue: 1500000 },
+    { date: '2026-09-01', platform: 'google', campaignId: '2', name: 'b', spend: 100000, impressions: 50000, clicks: 1000, landing: 0, views: 0, carts: 100, checkouts: 50, purchases: 25, revenue: 1000000 }
+  ];
+  const f = AD.combinedFunnel(rows, ['meta', 'google']);
+  const landing = f.steps.find(s => s.key === 'landing');
+  assert.equal(landing.value, 800); assert.equal(landing.rate, 0.8, '랜딩률은 메타 클릭 기준'); assert.ok(landing.partial);
+  const carts = f.steps.find(s => s.key === 'carts');
+  assert.equal(carts.value, 220); assert.equal(carts.rate, (120 + 100) / (600 + 1000), '장바구니는 각 매체의 앞 단계 기준');
+  const t = AD.sum(rows);
+  assert.equal(t.roas, 12.5); assert.equal(t.ctr, 2000 / 150000);
+  const loss = AD.comments({ ...AD.sum([{ spend: 100000, impressions: 5000, clicks: 50, purchases: 2, revenue: 150000 }]), beRoas: 3, kind: 'campaign', status: 'on' });
+  assert.equal(loss[0].level, 'bad'); assert.match(loss[0].text, /손익분기/); assert.equal(loss[0].action, 'down');
+  const none = AD.comments({ ...AD.sum([{ spend: 60000, impressions: 8000, clicks: 150, purchases: 0, revenue: 0 }]), kind: 'creative', status: 'on' });
+  assert.ok(none.some(c => c.level === 'bad' && /구매 없이/.test(c.text)));
+  const tired = AD.comments({ ...AD.sum([{ spend: 50000, impressions: 6000, clicks: 70, purchases: 3, revenue: 200000 }]), frequency: 4.5, kind: 'creative', trend: { first: AD.sum([{ impressions: 3000, clicks: 45 }]), second: AD.sum([{ impressions: 3000, clicks: 25 }]) } });
+  assert.ok(tired.some(c => /피로도/.test(c.text)));
+  const good = AD.comments({ ...AD.sum([{ spend: 100000, impressions: 9000, clicks: 100, purchases: 10, revenue: 600000 }]), beRoas: 3, dailyBudget: 10000, days: 10, kind: 'campaign', status: 'on' });
+  assert.equal(good[0].level, 'good'); assert.equal(good[0].action, 'up', '예산 소진 중이면 증액 제안');
+});

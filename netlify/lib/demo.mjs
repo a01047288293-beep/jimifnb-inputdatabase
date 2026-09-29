@@ -173,10 +173,62 @@ export async function demoAdRows(platform, from, to) {
       const revenue = Math.round(spend * roas / 100) * 100;
       const purchases = Math.max(0, Math.round(revenue / (def.productNo === 104 ? 69900 : 45000)));
       const clicks = Math.round(spend / (300 + r() * 500));
-      rows.push({ date: d, platform, campaignId: c.id, name: c.name, spend, impressions: clicks * Math.round(40 + r() * 60), clicks, purchases, revenue: purchases ? revenue : 0 });
+      // 퍼널: 클릭 → 랜딩 → 상품 조회 → 장바구니 → 결제 시작 → 구매 (구글은 장바구니·결제 시작만 전환으로 잡힌다고 가정)
+      const landing = platform === 'meta' ? Math.round(clicks * (0.7 + r() * 0.15)) : 0;
+      const views = platform === 'meta' ? Math.round(landing * (0.75 + r() * 0.15)) : 0;
+      const checkouts = Math.max(purchases, Math.round(purchases * (1.4 + r() * 0.5)));
+      const carts = Math.max(checkouts, Math.round(checkouts * (def.productNo === 102 ? 3.4 : 2.1) + r() * 2));
+      rows.push({ date: d, platform, campaignId: c.id, name: c.name, spend, impressions: clicks * Math.round(40 + r() * 60), clicks, purchases, revenue: purchases ? revenue : 0, landing, views, carts, checkouts });
     }
   }
   return rows;
+}
+/* 소재: 캠페인마다 2~3개. 일부 소재는 시간이 지나며 클릭률이 떨어지는(피로도) 패턴 */
+const DEMO_ADS = {
+  'm-1001': [['불고기 굽는 영상 15초', '영상', 0.5, 0], ['후기 캡처 이미지', '이미지', 0.3, 0], ['3팩 할인 배너', '이미지', 0.2, 1]],
+  'm-1002': [['육포 언박싱 릴스', '영상', 0.6, 1], ['매운맛 신제품 이미지', '이미지', 0.4, 0]],
+  'm-1003': [['추석 선물세트 카드뉴스', '이미지', 0.55, 0], ['보자기 포장 영상', '영상', 0.45, 0]],
+  'g-2001': [['한우 불고기 택배 | 3대째 해남성내식당', '검색 문구', 0.7, 0], ['양념 불고기 선물 | 무료배송', '검색 문구', 0.3, 0]],
+  'g-2002': [['전체상품 애셋 그룹', '이미지', 1, 0]],
+  't-3001': [['떡갈비 ASMR', '영상', 1, 1]]
+};
+export async function demoCreativeRows(platform, from, to) {
+  const camp = await demoAdRows(platform, from, to);
+  const out = [];
+  for (const row of camp) {
+    const ads = DEMO_ADS[row.campaignId] || [];
+    const age = Math.round((Date.parse(kstDate()) - Date.parse(row.date)) / 86400000);
+    ads.forEach(([name, , w, tired], k) => {
+      const r = rng(row.campaignId + k + row.date);
+      const decay = tired ? Math.max(0.4, 1 - (14 - Math.min(14, age)) * 0.045) : 1; // 최근일수록 약해짐
+      const share = w * (0.85 + r() * 0.3);
+      const part = x => Math.round(x * share);
+      const clicks = Math.round(row.clicks * share * decay);
+      const purchases = Math.round(row.purchases * share * (tired ? decay * 0.8 : 1.1));
+      out.push({ date: row.date, platform, adId: `${row.campaignId}-a${k + 1}`, name, group: platform === 'google' ? '광고그룹 1' : '광고세트 1', campaignId: row.campaignId, campaignName: row.name,
+        spend: part(row.spend), impressions: part(row.impressions), clicks, purchases, revenue: row.purchases ? Math.round(row.revenue * purchases / row.purchases) : 0,
+        landing: Math.round(row.landing * share * decay), views: Math.round(row.views * share * decay), carts: Math.round(row.carts * share * decay), checkouts: Math.round(row.checkouts * share * decay) });
+    });
+  }
+  return out;
+}
+export async function demoCreativeInfo(platform) {
+  const out = {};
+  for (const c of DEMO_CAMPAIGNS[platform] || []) (DEMO_ADS[c.id] || []).forEach(([name, format, , tired], k) => {
+    out[`${c.id}-a${k + 1}`] = { status: 'on', thumb: null, format, text: name };
+    void tired;
+  });
+  return out;
+}
+export async function demoReach(platform, from, to) {
+  if (platform !== 'meta') return {};
+  const days = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1);
+  const out = {};
+  for (const c of DEMO_CAMPAIGNS.meta) (DEMO_ADS[c.id] || []).forEach(([, , , tired], k) => {
+    const frequency = +(1.2 + days * (tired ? 0.22 : 0.06)).toFixed(2);
+    out[`${c.id}-a${k + 1}`] = { frequency, reach: null };
+  });
+  return out;
 }
 export async function demoSetStatus(platform, id, on) {
   const st = await demoState(); const k = platform + ':' + id;

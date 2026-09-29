@@ -183,6 +183,20 @@ with sync_playwright() as p:
         page.screenshot(path=f"{OUT}/07-ads.png", full_page=True)
     run(page, "광고 켜기/끄기·예산", ads)
 
+    def adanalysis():
+        page.click("a[data-page=adanalysis]")
+        expect(page.locator("h1")).to_contain_text("광고 분석")
+        expect(page.locator(".cmts li").first).to_be_visible()
+        expect(page.locator("svg.chart").first).to_be_visible()
+        for t, sel in [("campaigns", ".ad-card"), ("creatives", ".cr"), ("products", "table tbody tr"), ("funnel", ".fn-row")]:
+            page.click(f"#ad-tabs button[data-t={t}]")
+            expect(page.locator(sel).first).to_be_visible()
+        page.click("#ad-tabs button[data-t=creatives]")
+        page.click("[data-sort=roas]")
+        expect(page.locator("[data-sort=roas]")).to_have_attribute("aria-pressed", "true")
+        page.screenshot(path=f"{OUT}/07b-ad-analysis.png", full_page=True)
+    run(page, "광고 분석 탭·코멘트", adanalysis)
+
     def rules():
         page.click("a[data-page=rules]")
         expect(page.locator("h1")).to_contain_text("자동 규칙")
@@ -211,7 +225,7 @@ with sync_playwright() as p:
         m = b.new_context(viewport={"width": 390, "height": 844}, storage_state=ctx.storage_state())
         mp = m.new_page()
         mp.on("pageerror", lambda e: errors.append("mobile pageerror: " + str(e)))
-        for h in ["#/home", "#/ads", "#/products"]:
+        for h in ["#/home", "#/ads", "#/products", "#/adanalysis?t=creatives", "#/adanalysis?t=funnel"]:
             mp.goto(B + "/" + h)
             mp.wait_for_selector("h1")
             mp.wait_for_timeout(300)

@@ -63,6 +63,45 @@ export async function googleRows(from, to) {
   }));
 }
 
+/** 전환 액션 종류별(장바구니·결제 시작·페이지뷰) 일별 수. 설정 안 된 계정은 0 */
+async function googleSteps(from, to) {
+  const rows = await search(`SELECT campaign.id, segments.date, segments.conversion_action_category, metrics.all_conversions FROM campaign WHERE segments.date BETWEEN '${from}' AND '${to}'`);
+  const map = {};
+  const KEY = { ADD_TO_CART: 'carts', BEGIN_CHECKOUT: 'checkouts', PAGE_VIEW: 'views' };
+  for (const r of rows) {
+    const k = KEY[r.segments?.conversionActionCategory]; if (!k) continue;
+    const id = `${r.campaign?.id}|${r.segments?.date}`;
+    map[id] = map[id] || {}; map[id][k] = (map[id][k] || 0) + num(r.metrics?.allConversions);
+  }
+  return map;
+}
+export async function googleRowsFull(from, to) {
+  const rows = await googleRows(from, to);
+  let steps = {};
+  try { steps = await googleSteps(from, to); } catch { steps = {}; }
+  return rows.map(r => ({ landing: 0, views: 0, carts: 0, checkouts: 0, ...r, ...(steps[`${r.campaignId}|${r.date}`] || {}) }));
+}
+const adName = ad => ad?.name || ad?.responsiveSearchAd?.headlines?.[0]?.text || ad?.responsiveDisplayAd?.headlines?.[0]?.text || ({ RESPONSIVE_SEARCH_AD: '반응형 검색광고', RESPONSIVE_DISPLAY_AD: '반응형 디스플레이', VIDEO_AD: '동영상 광고' }[ad?.type] || ad?.type || '광고');
+/** 광고(소재) 단위 일별 성과: 일반 캠페인은 광고, 실적 최대화(P-MAX)는 애셋 그룹 */
+export async function googleAdRows(from, to) {
+  const m = r => ({ spend: Math.round(num(r.metrics?.costMicros) / 1e6), impressions: num(r.metrics?.impressions), clicks: num(r.metrics?.clicks), purchases: num(r.metrics?.conversions), revenue: num(r.metrics?.conversionsValue), landing: 0, views: 0, carts: 0, checkouts: 0 });
+  const MET = 'metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value';
+  const ads = await search(`SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.type, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.status, ad_group.name, campaign.id, campaign.name, segments.date, ${MET} FROM ad_group_ad WHERE segments.date BETWEEN '${from}' AND '${to}'`);
+  const out = ads.map(r => ({ date: r.segments?.date, platform: 'google', adId: String(r.adGroupAd?.ad?.id), name: adName(r.adGroupAd?.ad), group: r.adGroup?.name || '', campaignId: String(r.campaign?.id), campaignName: r.campaign?.name, ...m(r) }));
+  try {
+    const groups = await search(`SELECT asset_group.id, asset_group.name, campaign.id, campaign.name, segments.date, ${MET} FROM asset_group WHERE segments.date BETWEEN '${from}' AND '${to}'`);
+    for (const r of groups) out.push({ date: r.segments?.date, platform: 'google', adId: 'ag' + r.assetGroup?.id, name: r.assetGroup?.name || '애셋 그룹', group: 'P-MAX 애셋 그룹', campaignId: String(r.campaign?.id), campaignName: r.campaign?.name, ...m(r) });
+  } catch { /* P-MAX 없는 계정 */ }
+  return out;
+}
+export async function googleAdCreatives() {
+  const rows = await search("SELECT ad_group_ad.ad.id, ad_group_ad.ad.type, ad_group_ad.status FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'");
+  return Object.fromEntries(rows.map(r => [String(r.adGroupAd?.ad?.id), {
+    status: r.adGroupAd?.status === 'ENABLED' ? 'on' : r.adGroupAd?.status === 'PAUSED' ? 'off' : 'other', thumb: null,
+    format: /VIDEO/.test(r.adGroupAd?.ad?.type || '') ? '영상' : /SEARCH|TEXT/.test(r.adGroupAd?.ad?.type || '') ? '검색 문구' : '이미지', text: ''
+  }]));
+}
+
 export async function googleSetStatus(id, on) {
   const body = { operations: [{ updateMask: 'status', update: { resourceName: `customers/${env().cid}/campaigns/${id}`, status: on ? 'ENABLED' : 'PAUSED' } }] };
   return httpJson(url('campaigns:mutate'), { method: 'POST', label: '구글', headers: await headers(), body: JSON.stringify(body) });

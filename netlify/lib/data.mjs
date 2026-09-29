@@ -228,10 +228,12 @@ export async function reply(boardNo, articleNo, title, content, who) {
 
 /* ---------- 광고 ---------- */
 const LIVE = {
-  meta: { campaigns: M.metaCampaigns, rows: M.metaRows, status: M.metaSetStatus, budget: M.metaSetBudget },
-  google: { campaigns: G.googleCampaigns, rows: G.googleRows, status: G.googleSetStatus, budget: G.googleSetBudget },
-  tiktok: { campaigns: T.tiktokCampaigns, rows: T.tiktokRows, status: T.tiktokSetStatus, budget: T.tiktokSetBudget }
+  meta: { campaigns: M.metaCampaigns, rows: M.metaRows, status: M.metaSetStatus, budget: M.metaSetBudget, adRows: M.metaAdRows, adInfo: M.metaAdCreatives, reach: M.metaAdReach },
+  google: { campaigns: G.googleCampaigns, rows: G.googleRowsFull, status: G.googleSetStatus, budget: G.googleSetBudget, adRows: G.googleAdRows, adInfo: G.googleAdCreatives, reach: null },
+  tiktok: { campaigns: T.tiktokCampaigns, rows: T.tiktokRows, status: T.tiktokSetStatus, budget: T.tiktokSetBudget, adRows: null, adInfo: null, reach: null }
 };
+// ads2: 퍼널(랜딩·장바구니·결제 시작) 지표가 추가돼 새로 모음
+const AD_CACHE = 'cache/ads2';
 export async function campaigns(platform) {
   const m = await mode(platform);
   if (m === 'off') return [];
@@ -241,7 +243,7 @@ export async function adRows(platform, from, to) {
   const m = await mode(platform);
   if (m === 'off') return [];
   if (m === 'demo') return D.demoAdRows(platform, from, to);
-  return cachedDaily(`cache/ads/${platform}`, from, to, LIVE[platform].rows);
+  return cachedDaily(`${AD_CACHE}/${platform}`, from, to, LIVE[platform].rows);
 }
 /** 모든 매체: 실패한 매체는 errors 에 담고 나머지는 계속 */
 export async function allAds(from, to) {
@@ -254,6 +256,37 @@ export async function allAds(from, to) {
   }
   return out;
 }
+/** 광고(소재) 단위: 일별 성과 + 소재 정보(썸네일·형식) + 기간 빈도. 매체별 실패는 errors 로 */
+export async function allCreatives(from, to) {
+  const out = { rows: [], info: {}, reach: {}, errors: [] };
+  for (const p of PLATFORMS) {
+    const m = await mode(p);
+    if (m === 'off') continue;
+    try {
+      if (m === 'demo') {
+        out.rows.push(...await D.demoCreativeRows(p, from, to));
+        Object.assign(out.info, prefixKeys(p, await D.demoCreativeInfo(p)));
+        Object.assign(out.reach, prefixKeys(p, await D.demoReach(p, from, to)));
+        continue;
+      }
+      const L = LIVE[p];
+      if (!L.adRows) continue;
+      out.rows.push(...await cachedDaily(`cache/adcr/${p}`, from, to, L.adRows));
+      const infoKey = `cache/adinfo/${p}`;
+      let info = await getJSON(infoKey);
+      if (!info || Date.now() - info.at > 60 * 60000) { info = { at: Date.now(), map: await L.adInfo() }; await setJSON(infoKey, info); }
+      Object.assign(out.info, prefixKeys(p, info.map));
+      if (L.reach) {
+        const rk = `cache/adreach/${p}`;
+        let hit = await getJSON(rk);
+        if (!hit || hit.from !== from || hit.to !== to || Date.now() - hit.at > 30 * 60000) { hit = { at: Date.now(), from, to, map: await L.reach(from, to) }; await setJSON(rk, hit); }
+        Object.assign(out.reach, prefixKeys(p, hit.map));
+      }
+    } catch (e) { out.errors.push({ platform: p, message: e.message }); }
+  }
+  return out;
+}
+const prefixKeys = (p, map) => Object.fromEntries(Object.entries(map || {}).map(([k, v]) => [`${p}:${k}`, v]));
 export async function setCampaignStatus(platform, id, on, who, why) {
   if (!PLATFORMS.includes(platform)) throw new HttpError(400, '알 수 없는 매체입니다.');
   const m = await mode(platform);

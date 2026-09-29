@@ -17,7 +17,7 @@ export async function render(main, { query }) {
   const unlinked = list.filter(c => !c.productId && c.spend > 0).length;
 
   main.innerHTML = `
-  <div class="page-head"><h1>광고</h1><span class="hint">${Object.entries(d.modes).map(([p, m]) => PLAT[p] + ' ' + srcTag(m)).join(' ')}</span></div>
+  <div class="page-head"><h1>광고 관리 <a class="btn small" href="#/adanalysis" style="margin-left:8px">광고 분석 보기 →</a></h1><span class="hint">${Object.entries(d.modes).map(([p, m]) => PLAT[p] + ' ' + srcTag(m)).join(' ')}</span></div>
   <div class="stack">
     <div class="toolbar">
       <div class="seg" id="a-range">${RANGES.map(x => `<button data-r="${x.id}" aria-pressed="${x.id === R.id}">${x.label}</button>`).join('')}</div>

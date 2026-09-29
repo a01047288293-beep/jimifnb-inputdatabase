@@ -12,6 +12,7 @@ import * as stock from './pages/stock.js';
 import * as customers from './pages/customers.js';
 import * as fulfillment from './pages/fulfillment.js';
 import * as reconcile from './pages/reconcile.js';
+import * as adanalysis from './pages/adanalysis.js';
 
 /* ---------- 공통 도구 ---------- */
 export const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -119,6 +120,7 @@ const IC = {
   customers: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>',
   fulfillment: '<path d="M2 7h12v10H2zM14 10h4l3 3v4h-7"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
   products: '<path d="M9 3h6v5l4 11a1.5 1.5 0 0 1-1.4 2H6.4A1.5 1.5 0 0 1 5 19L9 8z"/>',
+  adan: '<path d="M3 20h18"/><path d="M5 16l4-5 4 3 6-8"/><circle cx="19" cy="6" r="1.5"/>',
   ads: '<path d="M3 11v2a1 1 0 0 0 1 1h3l6 5V5L7 10H4a1 1 0 0 0-1 1z"/><path d="M17 8a5 5 0 0 1 0 8"/>',
   rules: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
   log: '<path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="9"/>',
@@ -143,9 +145,10 @@ const PAGES = [
   { id: 'stock', label: '상품·재고', mod: stock, badge: 'stock' },
   { id: 'customers', label: '고객 분석', mod: customers },
   { id: 'fulfillment', label: '출고 운영', mod: fulfillment, badge: 'late' },
+  { id: 'adanalysis', label: '광고 분석', mod: adanalysis, icon: 'adan', badge: 'adbad' },
   { grp: '제품·마케팅' },
   { id: 'products', label: '제품·마진', mod: products },
-  { id: 'ads', label: '광고', mod: ads },
+  { id: 'ads', label: '광고 관리', mod: ads },
   { id: 'rules', label: '자동 규칙', mod: rules },
   { grp: '시스템' },
   { id: 'log', label: '변경 이력', mod: log },

@@ -8,7 +8,8 @@ import * as A from '../lib/analytics.mjs';
 import * as I from '../lib/insights.mjs';
 import { runSync } from '../lib/sync.mjs';
 import { getJSON, setJSON } from '../lib/store.mjs';
-import { draftReply, aiConfigured } from '../lib/ai.mjs';
+import { draftReply, aiConfigured, adCommentary } from '../lib/ai.mjs';
+import * as AD from '../lib/adinsights.mjs';
 import { blankProduct, calc } from '../../public/lib/margin.js';
 import { DEMO_PRODUCTS } from '../lib/demo.mjs';
 
@@ -293,6 +294,45 @@ route('GET', '/api/ads', async (req, s, url) => {
   const products = await data.listProducts();
   const list = A.campaignSummary(ads.campaigns, ads.rows, settings.campaignLinks || {}, products);
   return json({ from, to, campaigns: list, errors: ads.errors, modes: ads.modes, products: products.map(p => ({ id: p.id, name: p.name, beRoas: calc(p).beRoas })) });
+});
+/** 광고 분석: 개요·캠페인·소재·퍼널·제품 손익 + 코멘트 */
+async function adAnalysis(from, to) {
+  const days = dateRange(from, [to, kstDate()].sort()[0]);
+  const n = dateRange(from, to).length;
+  const pFrom = addDays(from, -n), pTo = addDays(from, -1);
+  const settings = await data.getSettings();
+  const products = await data.listProducts();
+  const idx = A.productIndex(products);
+  const ads = await data.allAds(from, to);
+  const prevAds = await data.allAds(pFrom, pTo).catch(() => ({ rows: [] }));
+  const cr = await data.allCreatives(from, to);
+  const errors = [...ads.errors, ...cr.errors.filter(e => !ads.errors.some(x => x.platform === e.platform))];
+  let orders = [], prevOrders = [];
+  try { orders = await data.ordersForStats(from, to); prevOrders = await data.ordersForStats(pFrom, pTo); } catch (e) { errors.push({ platform: 'cafe24', message: e.message }); }
+  const platforms = data.PLATFORMS.filter(p => ads.modes[p] !== 'off');
+  const summary = A.campaignSummary(ads.campaigns, ads.rows, settings.campaignLinks || {}, products);
+  const ov = AD.overview({ days, rows: ads.rows, prevRows: prevAds.rows, orders, prevOrders, platforms });
+  const camps = AD.campaignAnalysis(summary, ads.rows, days);
+  const creatives = AD.creativeAnalysis(cr.rows, cr.info, cr.reach, summary, days);
+  const fun = AD.funnelAnalysis(ads.rows, prevAds.rows, platforms);
+  const pl = AD.productPL({ products, idx, orders, campaigns: summary });
+  return { from, to, prevFrom: pFrom, prevTo: pTo, days, platforms, modes: ads.modes, errors, ov, camps, creatives, fun, pl, headline: AD.headline(ov, camps, creatives, fun) };
+}
+route('GET', '/api/ads/analysis', async (req, s, url) => {
+  const { from, to } = range(url, 92, 14);
+  const r = await adAnalysis(from, to);
+  const ai = await getJSON(`cache/adai/${from}_${to}`);
+  return json({ ...r, ai: aiConfigured(), aiComment: ai && Date.now() - ai.at < 6 * 3600000 ? ai : null });
+});
+route('POST', '/api/ads/ai-comment', async (req, s) => {
+  const b = await body(req);
+  const u = new URL('http://x/?from=' + encodeURIComponent(b.from || '') + '&to=' + encodeURIComponent(b.to || ''));
+  const { from, to } = range(u, 92, 14);
+  const r = await adAnalysis(from, to);
+  const text = await adCommentary(AD.aiBrief({ from, to, ...r }));
+  const out = { at: Date.now(), text, by: who(s) };
+  await setJSON(`cache/adai/${from}_${to}`, out);
+  return json(out);
 });
 route('POST', '/api/ads/status', async (req, s) => {
   const b = await body(req);
