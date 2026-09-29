@@ -11,6 +11,7 @@ import * as settings from './pages/settings.js';
 import * as stock from './pages/stock.js';
 import * as customers from './pages/customers.js';
 import * as fulfillment from './pages/fulfillment.js';
+import * as reconcile from './pages/reconcile.js';
 
 /* ---------- 공통 도구 ---------- */
 export const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -121,13 +122,22 @@ const IC = {
   ads: '<path d="M3 11v2a1 1 0 0 0 1 1h3l6 5V5L7 10H4a1 1 0 0 0-1 1z"/><path d="M17 8a5 5 0 0 1 0 8"/>',
   rules: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
   log: '<path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="9"/>',
+  reconcile: '<path d="M4 7h11M4 7l3-3M4 7l3 3M20 17H9M20 17l-3-3M20 17l-3 3"/>',
   settings: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>'
 };
 const PAGES = [
   { grp: '운영' },
   { id: 'home', label: '홈', mod: home },
-  { id: 'orders', label: '주문·출고', mod: orders },
   { id: 'cs', label: 'CS 문의', mod: cs, badge: 'cs' },
+  { grp: '주문관리' },
+  { id: 'orders', label: '전체 주문 조회', mod: orders, icon: 'orders' },
+  { id: 'orders/unpaid', label: '입금전 관리', mod: orders, sub: true, badge: 'unpaid' },
+  { id: 'orders/ready', label: '배송준비중 관리', mod: orders, sub: true, badge: 'ready' },
+  { id: 'orders/waiting', label: '배송대기 관리', mod: orders, sub: true },
+  { id: 'orders/shipping', label: '배송중 관리', mod: orders, sub: true },
+  { id: 'orders/done', label: '배송완료 조회', mod: orders, sub: true },
+  { id: 'orders/claims', label: '취소·교환·반품', mod: orders, sub: true },
+  { id: 'reconcile', label: '매출 대조', mod: reconcile, icon: 'reconcile' },
   { grp: '분석' },
   { id: 'sales', label: '매출 분석', mod: sales },
   { id: 'stock', label: '상품·재고', mod: stock, badge: 'stock' },
@@ -157,7 +167,7 @@ function renderShell() {
   app.innerHTML = `<div class="shell">
     <nav class="side" aria-label="메뉴">
       <div class="brand"><span class="logo">지</span><span><b>지미에프앤비</b><small>내부 운영실</small></span></div>
-      <div class="nav" id="nav">${PAGES.map(p => p.grp ? `<div class="grp">${p.grp}</div>` : `<a href="#/${p.id}" data-page="${p.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[p.id] || ''}</svg>${p.label}${p.badge ? `<span class="badge" id="badge-${p.badge}" hidden></span>` : ''}</a>`).join('')}</div>
+      <div class="nav" id="nav">${PAGES.map(p => p.grp ? `<div class="grp">${p.grp}</div>` : `<a href="#/${p.id}" data-page="${p.id}" class="${p.sub ? 'sub' : ''}">${p.sub ? '' : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[p.icon || p.id] || ''}</svg>`}${p.label}${p.badge ? `<span class="badge" id="badge-${p.badge}" hidden></span>` : ''}</a>`).join('')}</div>
       <div class="side-foot"><a id="shop-link" target="_blank" rel="noopener">자사몰 열기 ↗</a><a id="admin-link" target="_blank" rel="noopener">카페24 관리자 ↗</a><span id="who"></span><button class="btn small" id="logout" type="button">로그아웃</button></div>
     </nav>
     <main class="main" id="main"></main></div>`;
@@ -173,13 +183,15 @@ async function route() {
   document.getElementById('shop-link').href = state.shop.url;
   document.getElementById('admin-link').href = `https://${state.shop.mallId}.cafe24.com/disp/admin/shop1/main/dashboard`;
   const { page, args, query } = parseHash();
-  const p = PAGES.find(x => x.id === page && x.mod) || PAGES.find(x => x.mod);
+  const p = PAGES.find(x => x.mod && args[0] && x.id === `${page}/${args[0]}`) || PAGES.find(x => x.id === page && x.mod) || PAGES.find(x => x.mod);
   document.querySelectorAll('#nav a').forEach(a => a.setAttribute('aria-current', a.dataset.page === p.id ? 'page' : 'false'));
+  const pageArgs = p.id.includes('/') ? args.slice(1) : args;
+  const viewArgs = p.id.includes('/') ? [p.id.split('/')[1], ...pageArgs] : args;
   document.title = `${p.label} · ${APP_NAME}`;
   if (cleanup) { try { cleanup(); } catch { /* 무시 */ } cleanup = null; }
   const main = document.getElementById('main');
   main.innerHTML = loading();
-  try { cleanup = (await p.mod.render(main, { args, query })) || null; }
+  try { cleanup = (await p.mod.render(main, { args: viewArgs, query })) || null; }
   catch (e) { main.innerHTML = errBox(e); }
   window.scrollTo(0, 0);
 }

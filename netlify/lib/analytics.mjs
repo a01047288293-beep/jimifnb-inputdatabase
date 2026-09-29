@@ -14,7 +14,7 @@ export function productIndex(products) {
 
 /** 주문 1건 추정 공헌이익(광고비 제외). 원가를 모르는 상품이 섞이면 null */
 export function orderContribution(order, idx) {
-  if (order.canceled || String(order.status).startsWith('R')) return { counted: false };
+  if (order.paid === false || order.canceled || String(order.status).startsWith('R')) return { counted: false };
   const gross = num(order.amount);
   const hits = order.items.map(i => idx.get(Number(i.productNo)));
   if (!hits.length || hits.some(h => !h || h.unitCost == null)) return { counted: true, gross, contribution: null };

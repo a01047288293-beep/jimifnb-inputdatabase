@@ -232,3 +232,4 @@ textarea{min-height:90px;resize:vertical}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 /* 이전 화면에서 쓰던 색 이름 */
 :root{--c1:var(--s1);--c2:#6da7ec;--c3:var(--s2);--c4:var(--s4);--c5:var(--bad);--muted:var(--fg-3);--surface:var(--panel);--sunk:var(--panel-3);--accent-ink:#fff}
+.nav a.sub{padding:5px 10px 5px 36px;font-size:13px}

@@ -16,7 +16,7 @@ export async function render(main, { query }) {
   <div class="stack">
     ${periodBar(st, [7, 30, 90], 92)}
     <div class="kpis">
-      <a class="kpi ${d.delayed.length ? 'alert' : ''}" href="#/orders?group=ready"><span class="l">출고 지연</span><span class="v">${nf(d.delayed.length)}건</span><span class="s">결제 후 ${d.slaHours}시간이 지났는데 출고 전</span></a>
+      <a class="kpi ${d.delayed.length ? 'alert' : ''}" href="#/orders/ready"><span class="l">출고 지연</span><span class="v">${nf(d.delayed.length)}건</span><span class="s">결제 후 ${d.slaHours}시간이 지났는데 출고 전</span></a>
       <div class="kpi"><span class="l">결제→출고 (중간값)</span><span class="v">${hrs(d.leadMedian)}</span><span class="s">늦은 10%는 ${hrs(d.leadP90)} 이상</span></div>
       <div class="kpi"><span class="l">24시간 안에 출고</span><span class="v">${pctf(d.within24, 0)}</span><span class="s">48시간 안 ${pctf(d.within48, 0)} · ${nf(d.shippedCount)}건 기준</span></div>
       <div class="kpi"><span class="l">출고→배송완료</span><span class="v">${hrs(d.deliverMedian)}</span><span class="s">택배 이동 시간 중간값</span></div>
@@ -26,7 +26,7 @@ export async function render(main, { query }) {
     <section class="box"><div class="box-h"><h2>출고 지연 주문</h2>${d.delayed.length ? `<button class="btn small" id="csv-late">목록 내려받기(CSV)</button>` : ''}</div>
       ${d.delayed.length ? `<div class="tbl-wrap"><table><thead><tr><th>결제 시각</th><th>주문번호</th><th>상품</th><th>구매자</th><th class="n">지난 시간</th></tr></thead><tbody>
       ${d.delayed.map(o => `<tr><td class="hint">${esc(fmtTime(o.time))}</td><td>${esc(o.id)}</td><td>${esc(o.product)}${o.more > 0 ? ` <span class="hint">외 ${o.more}건</span>` : ''}</td><td>${esc(o.buyer)}</td><td class="n"><span class="pill ${o.hours > d.slaHours * 1.5 ? 'bad' : 'warn'}">${hrs(o.hours)}</span></td></tr>`).join('')}
-      </tbody></table></div><div><a class="btn" href="#/orders?group=ready">주문·출고에서 송장 입력</a></div>` : '<div class="empty">지연된 주문이 없습니다.</div>'}
+      </tbody></table></div><div><a class="btn" href="#/orders/ready">주문·출고에서 송장 입력</a></div>` : '<div class="empty">지연된 주문이 없습니다.</div>'}
     </section>
 
     <section class="box"><div class="box-h"><h2>날짜별 출고 소요시간</h2><span class="hint">그날 결제된 주문의 중간값</span></div>

@@ -71,7 +71,7 @@ with sync_playwright() as p:
 
     def orders():
         page.goto(B + "/#/orders?group=ready")
-        expect(page.locator("h1")).to_contain_text("주문·출고")
+        expect(page.locator("h1")).to_contain_text("배송준비중 관리")
         n = page.locator("[data-sel]").count()
         assert n > 0
         page.locator("[data-sel]").first.check()
@@ -81,12 +81,38 @@ with sync_playwright() as p:
         expect(page.locator("#toast")).to_contain_text("송장 1건")
         page.wait_for_timeout(300)
         assert page.locator("[data-sel]").count() == n - 1, "출고 대기에서 빠져야 함"
-        page.click("#o-groups button[data-g=all]")
+        page.click("#o-views button[data-v=all]")
         expect(page.locator("tbody tr").first).to_be_visible()
         href = page.locator("tbody a").first.get_attribute("href")
         assert href.startswith("https://www.jimifnb0901.com/product/detail.html?product_no="), href
         page.screenshot(path=f"{OUT}/04-orders.png", full_page=False)
     run(page, "주문·송장 입력", orders)
+
+    def order_menu():
+        page.click("a[data-page='orders/unpaid']")
+        expect(page.locator("h1")).to_contain_text("입금전 관리")
+        page.click("a[data-page='orders/claims']")
+        expect(page.locator("h1")).to_contain_text("취소·교환·반품")
+        page.click("#o-tabs button[data-t=R]")
+        page.click("a[data-page=orders]")
+        expect(page.locator("h1")).to_contain_text("전체 주문 조회")
+        page.click("#o-basis button[data-b=pay]")
+        expect(page.locator("#o-basis button[data-b=pay]")).to_have_attribute("aria-pressed", "true")
+        first = page.locator("[data-open]").first
+        oid = first.inner_text()
+        page.fill("#o-q", oid)
+        page.wait_for_timeout(400)
+        assert page.locator("[data-open]").count() == 1
+        page.locator("[data-open]").first.click()
+        expect(page.locator(".modal h2")).to_contain_text(oid)
+        expect(page.locator(".modal")).to_contain_text("받는 분")
+        page.screenshot(path=f"{OUT}/04b-order-detail.png")
+        page.click(".modal [data-close]")
+        page.click("a[data-page=reconcile]")
+        expect(page.locator("h1")).to_contain_text("매출 대조")
+        expect(page.locator("table tfoot")).to_contain_text("합계")
+        page.screenshot(path=f"{OUT}/04c-reconcile.png", full_page=True)
+    run(page, "주문관리 메뉴·상세·매출 대조", order_menu)
 
     def cs():
         page.click("a[data-page=cs]")

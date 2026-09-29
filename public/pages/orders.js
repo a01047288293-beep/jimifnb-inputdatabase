@@ -1,74 +1,150 @@
-import { api, esc, won, nf, srcTag, modal, toast, kstToday, addDays, go, shopLink } from '../app.js';
+// 주문관리: 카페24 주문관리와 같은 메뉴 구성 (전체·입금전·배송준비중·배송대기·배송중·배송완료·취소교환반품)
+import { api, esc, won, nf, srcTag, modal, toast, kstToday, addDays, go, shopLink, pageHead, state, setBadge } from '../app.js';
 import { downloadCsv } from './fulfillment.js';
+import { fmtTime } from './home.js';
 
-const GROUPS = [
-  { id: 'all', label: '전체', test: () => true },
-  { id: 'unpaid', label: '입금전', test: s => s === 'N00' },
-  { id: 'ready', label: '출고 대기', test: s => ['N10', 'N20', 'N21', 'N22'].includes(s) },
-  { id: 'shipping', label: '배송중', test: s => s === 'N30' },
-  { id: 'done', label: '배송완료', test: s => ['N40', 'N50'].includes(s) },
-  { id: 'claim', label: '취소·반품·교환', test: s => /^[CRE]/.test(s) }
+export const VIEWS = [
+  { id: 'all', label: '전체 주문 조회', desc: '기간 안의 모든 주문', codes: null },
+  { id: 'unpaid', label: '입금전 관리', desc: '주문했지만 아직 결제(입금)되지 않은 주문', codes: ['N00'] },
+  { id: 'ready', label: '배송준비중 관리', desc: '결제 완료 후 출고 전인 주문', codes: ['N10', 'N20', 'N22'], tabs: [['N10', '상품준비중'], ['N20', '배송준비중'], ['N22', '배송보류']], ship: true },
+  { id: 'waiting', label: '배송대기 관리', desc: '송장은 준비됐지만 아직 출발하지 않은 주문', codes: ['N21'], ship: true },
+  { id: 'shipping', label: '배송중 관리', desc: '택배사로 넘어간 주문', codes: ['N30'] },
+  { id: 'done', label: '배송완료 조회', desc: '배송이 끝났거나 구매확정된 주문', codes: ['N40', 'N50'] },
+  { id: 'claims', label: '취소·교환·반품', desc: '취소·교환·반품 신청과 처리 현황', prefix: ['C', 'E', 'R'], tabs: [['C', '취소'], ['E', '교환'], ['R', '반품']] }
 ];
-const tone = s => /^[CRE]/.test(s) ? 'bad' : ['N10', 'N20', 'N21', 'N22'].includes(s) ? 'warn' : s === 'N00' ? 'none' : s === 'N30' ? 'info' : 'good';
-
+const LEGACY = { unpaid: 'unpaid', ready: 'ready', shipping: 'shipping', done: 'done', claim: 'claims', all: 'all' };
+const tone = s => /^C/.test(s) ? 'bad' : /^[RE]/.test(s) ? 'warn' : ['N10', 'N20', 'N21', 'N22'].includes(s) ? 'warn' : s === 'N00' ? 'none' : s === 'N30' ? 'info' : 'good';
+const inView = (v, o) => v.codes ? v.codes.includes(o.status) : v.prefix ? v.prefix.includes(String(o.status)[0]) || (o.canceled && v.prefix.includes('C')) : true;
+const inTab = (v, o, t) => v.prefix ? String(o.status)[0] === t || (t === 'C' && o.canceled && !/^[ER]/.test(o.status)) : o.status === t;
+const AMOUNT_LABEL = {
+  order_price_amount: '상품 금액', shipping_fee: '배송비', membership_discount_amount: '회원 할인', coupon_discount_price: '쿠폰 할인',
+  coupon_shipping_fee_amount: '배송비 쿠폰', app_discount_amount: '앱 할인', additional_discount_price: '추가 할인', mileage_spent_amount: '적립금 사용',
+  points_spent_amount: '포인트 사용', credits_spent_amount: '예치금 사용', naverpay_point: '네이버페이 포인트', total_amount_due: '결제 예정 금액', payment_amount: '실제 결제금액'
+};
 let carriersCache = null;
 
-export async function render(main, { query }) {
+export async function render(main, { args, query }) {
+  const vid = args[0] || LEGACY[query.get('group')] || 'all';
+  const view = VIEWS.find(v => v.id === vid) || VIEWS[0];
   const today = kstToday();
-  const st = { from: query.get('from') || addDays(today, -6), to: query.get('to') || today, group: query.get('group') || 'all' };
-  const d = await api(`/api/orders?from=${st.from}&to=${st.to}`);
-  const counts = Object.fromEntries(GROUPS.map(g => [g.id, d.orders.filter(o => g.test(o.status)).length]));
-  const list = d.orders.filter(o => GROUPS.find(g => g.id === st.group).test(o.status));
-  const total = list.filter(o => !o.canceled).reduce((s, o) => s + o.amount, 0);
+  const defDays = ['all', 'done', 'claims'].includes(view.id) ? 7 : 30;
+  const st = {
+    from: query.get('from') || addDays(today, -(defDays - 1)), to: query.get('to') || today,
+    basis: query.get('basis') === 'pay' ? 'pay' : 'order', tab: query.get('tab') || '', q: query.get('q') || ''
+  };
+  const d = await api(`/api/orders?from=${st.from}&to=${st.to}&basis=${st.basis}`);
+  const counts = Object.fromEntries(VIEWS.map(v => [v.id, d.orders.filter(o => inView(v, o)).length]));
+  setBadge('unpaid', counts.unpaid); setBadge('ready', counts.ready + counts.waiting);
   const selected = new Set();
 
-  main.innerHTML = `
-  <div class="page-head"><h1>주문·출고</h1>${srcTag(d.mode)}</div>
-  <div class="stack">
-    <div class="toolbar">
-      <input type="date" id="o-from" value="${st.from}" max="${today}" aria-label="시작일"> ~ <input type="date" id="o-to" value="${st.to}" max="${today}" aria-label="종료일">
-      <div class="seg" id="o-quick"><button data-d="0">오늘</button><button data-d="2">3일</button><button data-d="6">7일</button><button data-d="30">31일</button></div>
-      <span class="hint">결제일 기준, 최대 31일</span>
-    </div>
-    <div class="seg" id="o-groups">${GROUPS.map(g => `<button data-g="${g.id}" aria-pressed="${g.id === st.group}">${g.label} <span class="num">${counts[g.id]}</span></button>`).join('')}</div>
-    <section class="box">
-      <div class="box-h"><h2>${esc(GROUPS.find(g => g.id === st.group).label)} ${nf(list.length)}건</h2>
-        <div class="row"><span class="hint">결제금액 합계 ${won(total)} (취소 제외)</span>
-        ${list.length ? '<button class="btn" id="o-csv">목록 내려받기(CSV)</button>' : ''}
-        ${st.group === 'ready' ? '<button class="btn primary" id="bulk-ship" disabled>선택 주문 송장 입력</button>' : ''}</div></div>
-      ${list.length ? `<div class="tbl-wrap"><table><thead><tr>${st.group === 'ready' ? '<th><input type="checkbox" id="sel-all" aria-label="전체 선택"></th>' : ''}<th>결제 시각</th><th>주문번호</th><th>상품</th><th class="n">수량</th><th class="n">결제금액</th><th>구매자</th><th>상태</th><th></th></tr></thead><tbody>
-      ${list.map(o => {
-        const first = o.items[0] || {};
-        const qty = o.items.reduce((s, i) => s + i.qty, 0);
-        const canShip = ['N10', 'N20', 'N21', 'N22'].includes(o.status);
-        return `<tr>${st.group === 'ready' ? `<td><input type="checkbox" data-sel="${esc(o.id)}" aria-label="선택"></td>` : ''}
-          <td class="hint">${esc(String(o.time).slice(5, 16).replace('T', ' '))}</td><td class="num">${esc(o.id)}</td>
-          <td>${shopLink(first.productNo, first.name || '')}${o.items.length > 1 ? ` <span class="hint">외 ${o.items.length - 1}건</span>` : ''}${first.option ? `<div class="hint">${esc(first.option)}</div>` : ''}</td>
-          <td class="n">${nf(qty)}</td><td class="n">${won(o.amount)}</td><td>${esc(o.buyer)}</td>
-          <td><span class="pill ${tone(o.status)}">${esc(o.statusLabel)}</span>${o.tracking ? `<div class="hint">${esc(o.tracking.trackingNo || '')}</div>` : ''}</td>
-          <td>${canShip ? `<button class="btn small" data-ship="${esc(o.id)}">송장 입력</button>` : ''}</td></tr>`;
-      }).join('')}</tbody></table></div>` : '<div class="empty">해당하는 주문이 없습니다.</div>'}
-    </section>
-  </div>`;
+  const draw = () => {
+    let list = d.orders.filter(o => inView(view, o));
+    if (st.tab) list = list.filter(o => inTab(view, o, st.tab));
+    const q = st.q.trim().toLowerCase();
+    if (q) list = list.filter(o => o.id.toLowerCase().includes(q) || String(o.buyer).toLowerCase().includes(q) || o.items.some(i => (i.name + ' ' + i.option).toLowerCase().includes(q)));
+    const payTotal = list.filter(o => !o.canceled && o.paid !== false).reduce((s, o) => s + o.amount, 0);
+    const orderTotal = list.reduce((s, o) => s + (o.orderAmount ?? o.amount), 0);
+    const timeOf = o => (st.basis === 'order' ? o.orderedAt || o.time : o.time);
+    selected.clear();
 
-  const csv = main.querySelector('#o-csv');
-  if (csv) csv.onclick = () => {
-    const rows = [['결제시각', '주문번호', '상품', '옵션', '수량', '결제금액', '결제수단', '구매자', '상태']];
-    for (const o of list) for (const it of o.items) rows.push([String(o.time).slice(0, 16).replace('T', ' '), o.id, it.name, it.option, it.qty, o.amount, o.payment || '', o.buyer, o.statusLabel]);
-    downloadCsv(`주문_${st.from}_${st.to}.csv`, rows);
+    main.innerHTML = `
+    ${pageHead(view.label, `${esc(view.desc)} · ${st.basis === 'order' ? '주문일' : '결제일'} 기준 ${srcTag(d.mode)}`, `<a class="btn small" href="https://${esc(state.shop.mallId)}.cafe24.com/disp/admin/shop1/main/dashboard" target="_blank" rel="noopener">카페24 관리자 ↗</a>`)}
+    <div class="stack">
+      <div class="seg" id="o-views" style="align-self:flex-start">${VIEWS.map(v => `<button data-v="${v.id}" aria-pressed="${v.id === view.id}">${esc(v.label.replace(' 관리', '').replace(' 조회', ''))} <span class="num muted">${counts[v.id]}</span></button>`).join('')}</div>
+      <div class="toolbar">
+        <div class="seg" id="o-basis"><button data-b="order" aria-pressed="${st.basis === 'order'}">주문일</button><button data-b="pay" aria-pressed="${st.basis === 'pay'}">결제일</button></div>
+        <div class="seg" id="o-quick"><button data-d="0">오늘</button><button data-d="6">7일</button><button data-d="29">1개월</button><button data-d="89">3개월</button></div>
+        <input type="date" id="o-from" value="${st.from}" max="${today}" aria-label="시작일"><span class="muted">~</span><input type="date" id="o-to" value="${st.to}" max="${today}" aria-label="종료일">
+        <input type="search" id="o-q" placeholder="주문번호·상품명·주문자 검색" value="${esc(st.q)}" style="max-width:240px" aria-label="검색">
+      </div>
+      ${view.tabs ? `<div class="seg" id="o-tabs" style="align-self:flex-start"><button data-t="" aria-pressed="${!st.tab}">전체</button>${view.tabs.map(([c, l]) => `<button data-t="${c}" aria-pressed="${st.tab === c}">${l} <span class="num muted">${d.orders.filter(o => inView(view, o) && inTab(view, o, c)).length}</span></button>`).join('')}</div>` : ''}
+      <section class="box">
+        <div class="box-h"><h2>${nf(list.length)}건</h2>
+          <div class="row"><span class="hint">주문금액 ${won(orderTotal)} · 결제금액 ${won(payTotal)} (취소·결제 전 제외)</span>
+          ${list.length ? '<button class="btn small" id="o-csv">목록 내려받기(CSV)</button>' : ''}
+          ${view.ship ? '<button class="btn primary small" id="bulk-ship" disabled>선택 주문 송장 입력</button>' : ''}</div></div>
+        ${list.length ? `<div class="tbl-wrap"><table><thead><tr>${view.ship ? '<th><input type="checkbox" id="sel-all" aria-label="전체 선택"></th>' : ''}<th>${st.basis === 'order' ? '주문' : '결제'} 시각</th><th>주문번호</th><th>상품</th><th class="n">수량</th><th class="n">주문금액</th><th class="n">결제금액</th><th>결제수단</th><th>주문자</th><th>상태</th><th></th></tr></thead><tbody>
+        ${list.map(o => {
+          const first = o.items[0] || {};
+          const qty = o.items.reduce((s, i) => s + i.qty, 0);
+          const canShip = ['N10', 'N20', 'N21', 'N22'].includes(o.status);
+          return `<tr>${view.ship ? `<td><input type="checkbox" data-sel="${esc(o.id)}" aria-label="선택"></td>` : ''}
+            <td class="hint" style="white-space:nowrap">${esc(fmtTime(timeOf(o)))}</td>
+            <td><button class="btn ghost small" style="color:var(--accent-2);padding:0" data-open="${esc(o.id)}">${esc(o.id)}</button></td>
+            <td>${shopLink(first.productNo, first.name || '')}${o.items.length > 1 ? ` <span class="hint">외 ${o.items.length - 1}건</span>` : ''}${first.option ? `<div class="hint">${esc(first.option)}</div>` : ''}</td>
+            <td class="n">${nf(qty)}</td><td class="n">${won(o.orderAmount ?? o.amount)}</td><td class="n">${o.paid === false ? '<span class="muted">결제 전</span>' : won(o.amount)}</td>
+            <td>${esc(o.payment || '')}</td><td>${esc(o.buyer)}</td>
+            <td><span class="pill ${tone(o.status)}">${esc(o.statusLabel)}</span>${o.tracking ? `<div class="hint">${esc(o.tracking.trackingNo || '')}</div>` : ''}</td>
+            <td>${canShip ? `<button class="btn small" data-ship="${esc(o.id)}">송장 입력</button>` : ''}</td></tr>`;
+        }).join('')}</tbody></table></div>` : '<div class="empty">해당하는 주문이 없습니다.</div>'}
+      </section>
+      <div class="hint">주문금액은 (판매가+옵션가)×수량+배송비로 할인 전 금액이고, 결제금액은 할인·적립금을 뺀 실제 결제액입니다. 카페24 숫자와 맞춰 볼 때는 <a href="#/reconcile">매출 대조</a>를 보세요. 주문번호를 누르면 상세가 열립니다.</div>
+    </div>`;
+    bind(list);
   };
-  const reload = patch => { const n = { ...st, ...patch }; go(`#/orders?from=${n.from}&to=${n.to}&group=${n.group}`); };
-  main.querySelector('#o-from').onchange = e => reload({ from: e.target.value });
-  main.querySelector('#o-to').onchange = e => reload({ to: e.target.value });
-  main.querySelectorAll('#o-quick button').forEach(b => b.onclick = () => reload({ from: addDays(today, -Number(b.dataset.d)), to: today }));
-  main.querySelectorAll('#o-groups button').forEach(b => b.onclick = () => reload({ group: b.dataset.g }));
-  main.querySelectorAll('[data-ship]').forEach(b => b.onclick = () => shipModal([d.orders.find(o => o.id === b.dataset.ship)], () => reload({})));
-  const bulk = main.querySelector('#bulk-ship');
-  const syncBulk = () => { if (bulk) { bulk.disabled = !selected.size; bulk.textContent = selected.size ? `선택 주문 ${selected.size}건 송장 입력` : '선택 주문 송장 입력'; } };
-  main.querySelectorAll('[data-sel]').forEach(c => c.onchange = () => { c.checked ? selected.add(c.dataset.sel) : selected.delete(c.dataset.sel); syncBulk(); });
-  const all = main.querySelector('#sel-all');
-  if (all) all.onchange = () => { main.querySelectorAll('[data-sel]').forEach(c => { c.checked = all.checked; c.checked ? selected.add(c.dataset.sel) : selected.delete(c.dataset.sel); }); syncBulk(); };
-  if (bulk) bulk.onclick = () => shipModal(d.orders.filter(o => selected.has(o.id)), () => reload({}));
+
+  const url = patch => { const n = { ...st, ...patch }; return `#/orders/${view.id}?from=${n.from}&to=${n.to}&basis=${n.basis}${n.tab ? `&tab=${n.tab}` : ''}${n.q ? `&q=${encodeURIComponent(n.q)}` : ''}`; };
+  const bind = list => {
+    main.querySelectorAll('#o-views button').forEach(b => b.onclick = () => go(`#/orders/${b.dataset.v}?from=${st.from}&to=${st.to}&basis=${st.basis}`));
+    main.querySelectorAll('#o-basis button').forEach(b => b.onclick = () => go(url({ basis: b.dataset.b })));
+    main.querySelectorAll('#o-quick button').forEach(b => b.onclick = () => go(url({ from: addDays(today, -Number(b.dataset.d)), to: today })));
+    main.querySelector('#o-from').onchange = e => go(url({ from: e.target.value }));
+    main.querySelector('#o-to').onchange = e => go(url({ to: e.target.value }));
+    main.querySelectorAll('#o-tabs button').forEach(b => b.onclick = () => { st.tab = b.dataset.t; draw(); });
+    const qi = main.querySelector('#o-q');
+    let t; qi.oninput = () => { clearTimeout(t); t = setTimeout(() => { st.q = qi.value; const pos = qi.selectionStart; draw(); const n = main.querySelector('#o-q'); n.focus(); n.setSelectionRange(pos, pos); }, 250); };
+    main.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openDetail(b.dataset.open, () => go(url({}))));
+    main.querySelectorAll('[data-ship]').forEach(b => b.onclick = () => shipModal([d.orders.find(o => o.id === b.dataset.ship)], () => go(url({}))));
+    const csv = main.querySelector('#o-csv');
+    if (csv) csv.onclick = () => {
+      const rows = [['주문시각', '결제시각', '주문번호', '상품', '옵션', '수량', '주문금액', '결제금액', '결제수단', '주문경로', '주문자', '상태']];
+      for (const o of list) for (const it of o.items) rows.push([fmtTime(o.orderedAt), o.paid === false ? '' : fmtTime(o.time), o.id, it.name, it.option, it.qty, o.orderAmount ?? o.amount, o.paid === false ? '' : o.amount, o.payment || '', o.channel || '', o.buyer, o.statusLabel]);
+      downloadCsv(`주문_${view.label}_${st.from}_${st.to}.csv`, rows);
+    };
+    const bulk = main.querySelector('#bulk-ship');
+    const sync = () => { if (bulk) { bulk.disabled = !selected.size; bulk.textContent = selected.size ? `선택 ${selected.size}건 송장 입력` : '선택 주문 송장 입력'; } };
+    main.querySelectorAll('[data-sel]').forEach(c => c.onchange = () => { c.checked ? selected.add(c.dataset.sel) : selected.delete(c.dataset.sel); sync(); });
+    const all = main.querySelector('#sel-all');
+    if (all) all.onchange = () => { main.querySelectorAll('[data-sel]').forEach(c => { c.checked = all.checked; c.checked ? selected.add(c.dataset.sel) : selected.delete(c.dataset.sel); }); sync(); };
+    if (bulk) bulk.onclick = () => shipModal(d.orders.filter(o => selected.has(o.id)), () => go(url({})));
+  };
+  draw();
+}
+
+async function openDetail(id, done) {
+  const close = modal('<div class="empty">주문을 불러오는 중…</div>');
+  let o;
+  try { o = await api('/api/orders/' + encodeURIComponent(id)); } catch (e) { close(); toast(e.message, true); return; }
+  close();
+  const amounts = Object.entries(o.amounts || {}).filter(([k, v]) => AMOUNT_LABEL[k] && v !== 0 && k !== 'payment_amount');
+  const canShip = ['N10', 'N20', 'N21', 'N22'].includes(o.status);
+  modal(`<div class="box-h"><h2>주문 ${esc(o.id)}</h2><span class="pill ${tone(o.status)}">${esc(o.statusLabel)}</span></div>
+    <div class="stat-line"><span>주문 시각</span><b>${esc(fmtTime(o.orderedAt))}</b></div>
+    <div class="stat-line"><span>결제 시각</span><b>${o.paid === false ? '결제 전' : esc(fmtTime(o.time))}</b></div>
+    <div class="stat-line"><span>결제수단 · 주문 경로</span><b>${esc(o.payment || '–')} · ${esc(o.channel || '–')}</b></div>
+    <h3>품목</h3>
+    <div class="tbl-wrap"><table><thead><tr><th>상품</th><th>옵션</th><th class="n">수량</th><th class="n">판매가</th><th>상태</th></tr></thead><tbody>
+      ${o.items.map(i => `<tr><td>${shopLink(i.productNo, i.name)}</td><td>${esc(i.option || '–')}</td><td class="n">${nf(i.qty)}</td><td class="n">${won(i.price + (i.optionPrice || 0))}</td><td><span class="pill ${tone(i.status)}">${esc(i.statusLabel)}</span></td></tr>`).join('')}
+    </tbody></table></div>
+    <h3>금액</h3>
+    <div class="stat-line"><span>주문금액 (할인 전)</span><b>${won(o.orderAmount ?? o.amount)}</b></div>
+    ${amounts.map(([k, v]) => `<div class="stat-line"><span>${esc(AMOUNT_LABEL[k])}</span><b>${won(v)}</b></div>`).join('')}
+    <div class="stat-line"><span>실제 결제금액</span><b>${o.paid === false ? '결제 전' : won(o.amount)}</b></div>
+    <h3>받는 분</h3>
+    <div class="stat-line"><span>이름 · 연락처</span><b>${esc(o.receiver?.name || '–')} · ${esc(o.receiver?.phone || '–')}</b></div>
+    <div class="stat-line"><span>주소</span><b style="text-align:right">${esc([o.receiver?.zipcode, o.receiver?.address].filter(Boolean).join(' ') || '–')}</b></div>
+    ${o.receiver?.message ? `<div class="stat-line"><span>배송 메시지</span><b>${esc(o.receiver.message)}</b></div>` : ''}
+    <div class="stat-line"><span>주문자</span><b>${esc(o.buyerFull?.name || o.buyer)}${o.buyerFull?.phone ? ' · ' + esc(o.buyerFull.phone) : ''}</b></div>
+    ${o.shipments?.length ? `<div class="stat-line"><span>송장</span><b>${o.shipments.map(s => esc(`${s.carrier} ${s.trackingNo}`)).join(', ')}</b></div>` : ''}
+    ${o.claimReason ? `<div class="stat-line"><span>취소·반품 사유</span><b>${esc(o.claimReason)}</b></div>` : ''}
+    <div class="hint">받는 분 정보는 이 화면에서만 보여주며 운영실에 저장하지 않습니다.</div>
+    <div class="foot"><button class="btn" id="d-copy">주문번호 복사</button>${canShip ? '<button class="btn primary" id="d-ship">송장 입력</button>' : ''}<button class="btn" data-close>닫기</button></div>`, {
+    onMount: (el, closeD) => {
+      el.querySelector('#d-copy').onclick = async () => { try { await navigator.clipboard.writeText(o.id); toast('주문번호를 복사했습니다.'); } catch { toast('복사하지 못했습니다. 번호를 직접 선택해 복사하세요.', true); } };
+      const s = el.querySelector('#d-ship');
+      if (s) s.onclick = () => { closeD(); shipModal([o], done); };
+    }
+  });
 }
 
 async function shipModal(orders, done) {

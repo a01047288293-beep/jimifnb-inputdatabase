@@ -147,6 +147,24 @@ test('운영 분석 API (데모)', async () => {
   assert.equal((await call('PUT', '/api/settings', { shipSlaHours: 24 })).json.shipSlaHours, 24);
 });
 
+test('주문관리: 주문일·결제일 기준, 상세, 매출 대조', async () => {
+  const byOrder = await call('GET', '/api/orders?from=2026-09-20&to=2026-09-29&basis=order');
+  const byPay = await call('GET', '/api/orders?from=2026-09-20&to=2026-09-29&basis=pay');
+  assert.equal(byOrder.json.basis, 'order');
+  assert.ok(byOrder.json.orders.some(o => o.status === 'N00'), '주문일 기준에는 입금전 포함');
+  assert.ok(!byPay.json.orders.some(o => o.paid === false), '결제일 기준에는 입금전 없음');
+  const one = byOrder.json.orders[0];
+  const det = await call('GET', '/api/orders/' + one.id);
+  assert.equal(det.status, 200); assert.equal(det.json.id, one.id); assert.ok(det.json.receiver.address); assert.ok(det.json.items[0].statusLabel);
+  assert.equal((await call('GET', '/api/orders/20260929-999999x')).status, 404);
+  const rec = await call('GET', '/api/reconcile?from=2026-09-20&to=2026-09-29');
+  assert.equal(rec.status, 200); assert.equal(rec.json.rows.length, 10);
+  const T = rec.json.total;
+  assert.ok(T.orderCount >= T.payCount); assert.ok(T.orderAmount > T.ours); assert.ok(T.discount > 0); assert.ok(T.unpaidCount > 0);
+  assert.equal(T.ours, rec.json.rows.reduce((s, r) => s + r.ours, 0));
+  assert.equal((await call('GET', '/api/reconcile?from=2026-08-01&to=2026-09-29')).status, 400, '31일 초과 거부');
+});
+
 test('설정 검증과 수동 수집', async () => {
   assert.equal((await call('PUT', '/api/settings', { minBudget: -5 })).status, 400);
   const st = await call('PUT', '/api/settings', { csWriter: '지미에프앤비 CS', maxBudgetChangePct: 300 });

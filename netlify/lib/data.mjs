@@ -117,7 +117,7 @@ const ORDER_CACHE = 'cache/orders2';
 export async function ordersForStats(from, to, opts = {}) {
   const m = await mode('cafe24');
   if (m === 'off') return [];
-  if (m === 'demo') return D.demoOrders(from, to);
+  if (m === 'demo') return (await D.demoOrders(from, to)).filter(o => o.paid !== false);
   return cachedDaily(ORDER_CACHE, from, to, C.fetchOrders, { maxFetch: opts.maxFetch ?? 62 });
 }
 /** 과거 주문 기록 채우기: 자동 수집 때마다 오래된 빈 날짜를 조금씩 채움 */
@@ -149,11 +149,21 @@ export async function inventory() {
   await setJSON('cache/inventory', { at: Date.now(), rows });
   return rows;
 }
-export async function ordersLive(from, to) {
+/** 실시간 주문. basis: 'order'(주문일, 카페24 주문관리 기본) | 'pay'(결제일) */
+export async function ordersLive(from, to, basis = 'pay') {
   const m = await mode('cafe24');
   if (m === 'off') return [];
-  if (m === 'demo') return D.demoOrders(from, to);
-  return C.fetchOrders(from, to);
+  if (m === 'demo') { const all = await D.demoOrders(from, to); return basis === 'pay' ? all.filter(o => o.paid) : all; }
+  return C.fetchOrders(from, to, basis === 'order' ? 'order_date' : 'pay_date');
+}
+export async function orderDetail(id) {
+  const m = await mode('cafe24');
+  if (m === 'off') throw new HttpError(409, '카페24가 연결되지 않았습니다.');
+  if (m === 'live') return C.fetchOrderDetail(id);
+  const day = /^\d{8}-/.test(id) ? `${id.slice(0, 4)}-${id.slice(4, 6)}-${id.slice(6, 8)}` : null;
+  const o = day ? (await D.demoOrders(day, day)).find(x => x.id === id) : null;
+  if (!o) throw new HttpError(404, '주문을 찾지 못했습니다.');
+  return { ...o, receiver: { name: o.buyer, phone: '010-****-1234', zipcode: '61000', address: '(데모) 광주광역시 남구 봉선로 21', message: '문 앞에 놓아주세요' }, buyerFull: { name: o.buyer, phone: '010-****-1234', email: '' }, shipments: o.tracking ? [{ trackingNo: o.tracking.trackingNo, carrier: o.tracking.carrierCode }] : [], memo: '' };
 }
 export async function carriers() {
   return (await mode('cafe24')) === 'live' ? C.fetchCarriers() : D.demoCarriers();

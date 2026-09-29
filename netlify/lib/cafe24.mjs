@@ -111,7 +111,7 @@ export function normalizeOrder(o) {
   const items = (o.items || []).map(it => ({
     itemCode: it.order_item_code, productNo: num(it.product_no), name: it.product_name || '', option: it.option_value || '',
     variant: it.variant_code || '',
-    qty: num(it.quantity) || 1, price: num(it.product_price), status: it.order_status || '',
+    qty: num(it.quantity) || 1, price: num(it.product_price), optionPrice: num(it.option_price), status: it.order_status || '',
     shippedAt: dt(pick(it.shipped_date, it.shipbegin_date)), deliveredAt: dt(pick(it.delivered_date, it.shipend_date)),
     claimReason: pick(it.claim_reason, it.claim_reason_type, null)
   }));
@@ -119,11 +119,17 @@ export function normalizeOrder(o) {
   const amount = num(o.payment_amount) || num(o.actual_order_amount?.payment_amount) || num(o.actual_order_amount?.total_amount_due)
     || items.reduce((s, i) => s + i.price * i.qty, 0);
   const pay = o.payment_date || o.order_date || '';
+  const shippingFee = num(o.shipping_fee ?? o.actual_order_amount?.shipping_fee);
+  // 카페24 대시보드의 '주문 금액'과 같은 방식: (판매가+옵션가)×수량 + 배송비 (할인·적립금 차감 전)
+  const orderAmount = items.reduce((s2, i) => s2 + (i.price + i.optionPrice) * i.qty, 0) + shippingFee;
+  const amounts = {};
+  for (const [k, v] of Object.entries(o.actual_order_amount || {})) if (v != null && v !== '' && isFinite(Number(v))) amounts[k] = Number(v);
   const rcv = Array.isArray(o.receivers) ? o.receivers[0] : null;
   const pm = o.payment_method_name ?? o.payment_method;
   return {
-    id: o.order_id, date: String(pay).slice(0, 10), time: pay, orderedAt: o.order_date || pay, status,
-    amount, shippingFee: num(o.shipping_fee ?? o.actual_order_amount?.shipping_fee),
+    id: o.order_id, date: String(pay).slice(0, 10), time: pay, orderedAt: o.order_date || pay,
+    orderDate: String(o.order_date || pay).slice(0, 10), paid: o.paid === 'T' || (o.paid == null && Boolean(o.payment_date)), status,
+    amount, orderAmount, amounts, shippingFee,
     buyer: maskName(o.buyer_name || o.buyer?.name || ''),
     canceled: o.canceled === 'T' || String(status).startsWith('C'),
     channel: o.order_place_name || o.order_place_id || '',
@@ -136,14 +142,14 @@ export function normalizeOrder(o) {
   };
 }
 /** 결제일 기준 주문 목록 (카페24는 한 번에 최대 3개월, 페이지당 100건) */
-export async function fetchOrders(from, to) {
+export async function fetchOrders(from, to, dateType = 'pay_date') {
   const e = env();
   const out = [];
   let chunkFrom = from;
   while (chunkFrom <= to) {
     const chunkTo = [addDays(chunkFrom, 88), to].sort()[0];
     for (let offset = 0; offset <= 15000; offset += 100) {
-      const data = await call('orders', { query: { shop_no: e.shopNo, start_date: chunkFrom, end_date: chunkTo, date_type: 'pay_date', embed: 'items,receivers,cancellation,return', limit: 100, offset } });
+      const data = await call('orders', { query: { shop_no: e.shopNo, start_date: chunkFrom, end_date: chunkTo, date_type: dateType, embed: 'items,receivers,cancellation,return', limit: 100, offset } });
       const list = data?.orders || [];
       for (const o of list) out.push(normalizeOrder(o));
       if (list.length < 100) break;
@@ -151,6 +157,24 @@ export async function fetchOrders(from, to) {
     chunkFrom = addDays(chunkTo, 1);
   }
   return out;
+}
+/** 주문 1건 상세 (받는 분 정보는 화면에만 보여주고 저장하지 않음) */
+export async function fetchOrderDetail(orderId) {
+  const data = await call(`orders/${encodeURIComponent(orderId)}`, { query: { shop_no: env().shopNo, embed: 'items,receivers,buyer,cancellation,return' } });
+  const o = data?.order;
+  if (!o) throw new HttpError(404, '주문을 찾지 못했습니다.');
+  const n = normalizeOrder(o);
+  const r = Array.isArray(o.receivers) ? o.receivers[0] : {};
+  const b = o.buyer || {};
+  n.receiver = {
+    name: r?.name || o.receiver_name || '', phone: r?.cellphone || r?.phone || '',
+    zipcode: r?.zipcode || '', address: [r?.address1, r?.address2].filter(Boolean).join(' ') || o.receiver_address || '',
+    message: r?.shipping_message || o.shipping_message || ''
+  };
+  n.buyerFull = { name: b.name || o.buyer_name || '', phone: b.cellphone || b.phone || o.buyer_cellphone || '', email: b.email || o.buyer_email || '' };
+  n.shipments = (o.items || []).filter(i => i.tracking_no).map(i => ({ trackingNo: i.tracking_no, carrier: i.shipping_company_name || i.shipping_company_code || '' }));
+  n.memo = o.admin_additional_memo || '';
+  return n;
 }
 export async function fetchCarriers() {
   const data = await call('carriers', { query: { shop_no: env().shopNo } });

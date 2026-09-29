@@ -69,7 +69,8 @@ test('카페24: 주문 페이지 넘김·변환, 게시판 답변 여부, 송장
   assert.deepEqual({ id: orders[0].id, date: orders[0].date, amount: orders[0].amount, buyer: orders[0].buyer, status: orders[0].status, qty: orders[0].items[0].qty },
     { id: '20260929-0000000', date: '2026-09-29', amount: 34900, buyer: '김*웅', status: 'N20', qty: 1 });
   assert.deepEqual([orders[0].payment, orders[0].channel, orders[0].firstOrder, orders[0].region], ['카드', '모바일 웹', true, '서울']);
-  assert.equal(orders[0].member, orders[3].member, '같은 회원은 같은 값'); assert.notEqual(orders[0].member, 'user0', '회원 아이디 원문은 저장 안 함');
+  assert.equal(orders[0].member, orders[3].member, '같은 회원은 같은 값');
+  assert.equal(orders[0].orderAmount, 34900); assert.equal(orders[0].paid, true); assert.equal(orders[0].orderDate, '2026-09-29'); assert.notEqual(orders[0].member, 'user0', '회원 아이디 원문은 저장 안 함');
   const lastCall = calls.filter(c => c.url.includes('/admin/orders?')).at(-1);
   assert.equal(lastCall.opt.headers['X-Cafe24-Api-Version'], '2026-09-01');
   assert.match(lastCall.opt.headers.Authorization, /^Bearer at/);

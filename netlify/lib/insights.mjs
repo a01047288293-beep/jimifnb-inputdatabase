@@ -2,7 +2,7 @@
 import { num } from './util.mjs';
 
 export const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
-export const valid = o => !o.canceled && !/^[RC]/.test(String(o.status));
+export const valid = o => o.paid !== false && !o.canceled && !/^[RC]/.test(String(o.status));
 const H = 3600000;
 
 /** 결제 시각의 한국시간 [요일, 시] */

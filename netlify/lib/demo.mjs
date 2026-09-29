@@ -19,7 +19,8 @@ const OPTIONS = { 101: ['1팩', '2팩 세트', '3팩 세트'], 102: ['오리지�
 const CLAIM_REASONS = ['단순 변심', '배송 지연', '포장 파손', '주문 실수', '상품 불만족'];
 const MEMBERS = Array.from({ length: 1400 }, (_, i) => 'm' + i);
 const NAMES = ['김서연', '이도윤', '박지우', '최하준', '정서아', '강민준', '조하은', '윤지호', '장예린', '임도현', '한수아', '오지훈'];
-const ITEM_STATUS_BY_AGE = age => age === 0 ? ['N10', 'N20', 'N20', 'N00'] : age === 1 ? ['N20', 'N21', 'N30'] : age <= 3 ? ['N30', 'N40'] : ['N40', 'N50', 'N50'];
+// 무통장입금은 며칠 동안 입금전(N00)으로 남을 수 있음
+const ITEM_STATUS_BY_AGE = age => age === 0 ? ['N10', 'N20', 'N20', 'N00', 'N00'] : age === 1 ? ['N00', 'N20', 'N21', 'N30', 'N30'] : age === 2 ? ['N00', 'N30', 'N40', 'N40'] : age <= 3 ? ['N30', 'N40'] : ['N40', 'N50', 'N50'];
 
 async function demoState() { return (await getJSON('demo/state')) || { campaigns: {}, shipped: {}, replied: {} }; }
 async function saveDemoState(s) { await setJSON('demo/state', s); }
@@ -61,8 +62,9 @@ export async function demoOrders(from, to) {
       const opts = OPTIONS[p.productNo] || [''];
       const buyer = NAMES[(mIdx + (isMember ? 0 : 5)) % NAMES.length].replace(/^(.).(.)$/, '$1*$2');
       out.push({
-        id, date: d, time, orderedAt: time, status,
-        amount: p.price * qty + ship, shippingFee: ship, buyer,
+        id, date: d, time, orderedAt: time, orderDate: d, paid: status !== 'N00', status,
+        // 일부 주문은 쿠폰 할인 → 결제금액이 주문금액보다 작음
+        amount: p.price * qty + ship - (i % 5 === 0 ? 2000 : 0), orderAmount: p.price * qty + ship, amounts: {}, shippingFee: ship, buyer,
         canceled: status.startsWith('C'), channel: CHANNELS[Math.floor(r() * CHANNELS.length)],
         payment: PAYMENTS[Math.floor(r() * PAYMENTS.length)],
         firstOrder: null,
