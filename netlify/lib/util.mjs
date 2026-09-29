@@ -15,7 +15,7 @@ export function addDays(ymd, n) {
 export function dateRange(from, to) {
   const out = [];
   if (!isYmd(from) || !isYmd(to) || from > to) return out;
-  for (let d = from; d <= to && out.length < 400; d = addDays(d, 1)) out.push(d);
+  for (let d = from; d <= to && out.length < 600; d = addDays(d, 1)) out.push(d);
   return out;
 }
 export function isYmd(s) { return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s)); }
