@@ -61,10 +61,13 @@ export async function demoOrders(from, to) {
       const mIdx = Math.floor(Math.pow(r(), 2.2) * MEMBERS.length); // 소수 단골이 자주 사고 대부분은 한두 번
       const opts = OPTIONS[p.productNo] || [''];
       const buyer = NAMES[(mIdx + (isMember ? 0 : 5)) % NAMES.length].replace(/^(.).(.)$/, '$1*$2');
+      // 일부 주문은 쿠폰 할인 → 결제금액이 주문금액보다 작음. 일부는 선불금(예치금)으로 일부 결제
+      const amount = p.price * qty + ship - (i % 5 === 0 ? 2000 : 0);
+      const credits = i % 7 === 3 ? Math.min(amount, 22000) : 0;
       out.push({
         id, date: d, time, orderedAt: time, orderDate: d, paid: status !== 'N00', status,
-        // 일부 주문은 쿠폰 할인 → 결제금액이 주문금액보다 작음
-        amount: p.price * qty + ship - (i % 5 === 0 ? 2000 : 0), orderAmount: p.price * qty + ship, amounts: {}, shippingFee: ship, buyer,
+        amount, cash: amount - credits, points: 0, credits, orderAmount: p.price * qty + ship,
+        amounts: credits ? { payment_amount: amount - credits, credits_spent_amount: credits } : {}, shippingFee: ship, buyer,
         canceled: status.startsWith('C'), channel: CHANNELS[Math.floor(r() * CHANNELS.length)],
         payment: PAYMENTS[Math.floor(r() * PAYMENTS.length)],
         firstOrder: null,
@@ -77,6 +80,14 @@ export async function demoOrders(from, to) {
     }
   }
   return out;
+}
+/** 취소·반품 완료 주문의 환불: 주문 다음날(취소) 또는 사흘 뒤(반품) 환불 완료 */
+export async function demoRefunds(from, to) {
+  const orders = await demoOrders(addDays(from, -5), to);
+  return orders.filter(o => o.paid !== false && (o.status === 'C40' || o.status === 'R40')).map(o => {
+    const date = addDays(o.date, o.status === 'C40' ? 1 : 3);
+    return { code: 'RF' + o.id, orderId: o.id, date, amount: o.amount, cash: o.cash, points: 0, credits: o.credits, done: true, numeric: {} };
+  }).filter(r => r.date >= from && r.date <= to && r.date <= kstDate());
 }
 export async function demoInventory() {
   const r = rng('inv' + kstDate());

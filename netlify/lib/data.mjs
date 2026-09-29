@@ -113,7 +113,8 @@ async function cachedDaily(prefix, from, to, fetchRange, { maxFetch = 400 } = {}
 }
 
 /* ---------- 주문 ---------- */
-const ORDER_CACHE = 'cache/orders2';
+// orders3: 결제금액에 적립금·예치금(선불금) 포함으로 바뀌어 새로 모음
+const ORDER_CACHE = 'cache/orders3';
 export async function ordersForStats(from, to, opts = {}) {
   const m = await mode('cafe24');
   if (m === 'off') return [];
@@ -156,6 +157,28 @@ export async function ordersLive(from, to, basis = 'pay') {
   if (m === 'demo') { const all = await D.demoOrders(from, to); return basis === 'pay' ? all.filter(o => o.paid) : all; }
   return C.fetchOrders(from, to, basis === 'order' ? 'order_date' : 'pay_date');
 }
+/** 지금 처리할 상태(입금전~배송중, 취소·반품·교환 접수)인 주문 전부. 주문일 기간과 무관 */
+export async function activeOrders(force = false) {
+  const m = await mode('cafe24');
+  if (m === 'off') return { orders: [], at: null };
+  const today = kstDate();
+  if (m === 'demo') {
+    const all = await D.demoOrders(addDays(today, -60), today);
+    return { orders: all.filter(o => C.ACTIVE_CODES.includes(o.status)), at: Date.now() };
+  }
+  const hit = await getJSON('cache/active');
+  if (!force && hit && Date.now() - hit.at < 2 * 60000) return hit;
+  const res = { orders: await C.fetchActiveOrders(today), at: Date.now() };
+  await setJSON('cache/active', res);
+  return res;
+}
+/** 환불 완료일 기준 환불 */
+export async function refunds(from, to) {
+  const m = await mode('cafe24');
+  if (m === 'off') return [];
+  if (m === 'demo') return D.demoRefunds(from, to);
+  return C.fetchRefunds(from, to);
+}
 export async function orderDetail(id) {
   const m = await mode('cafe24');
   if (m === 'off') throw new HttpError(409, '카페24가 연결되지 않았습니다.');
@@ -173,6 +196,7 @@ export async function ship(orderId, itemCodes, carrierCode, trackingNo, who) {
   if (m === 'off') throw new HttpError(409, '카페24가 연결되지 않았습니다.');
   if (m === 'live') await C.createShipment(orderId, itemCodes, carrierCode, trackingNo);
   else await D.demoShip(orderId, carrierCode, trackingNo);
+  await delKey('cache/active').catch(() => {});
   await addLog({ who, kind: '송장 등록', target: `주문 ${orderId}`, detail: `${carrierCode} ${trackingNo}${m === 'demo' ? ' (데모)' : ''}` });
 }
 export async function shopProducts() {

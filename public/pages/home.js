@@ -3,7 +3,7 @@ import { lineChart, delta, spark, man } from '../charts.js';
 
 export async function render(main) {
   const d = await api('/api/home');
-  setBadge('cs', d.unansweredCs); setBadge('stock', d.stockAlerts); setBadge('late', d.delayed); setBadge('ready', d.pendingShip); setBadge('unpaid', d.unpaid);
+  setBadge('cs', d.unansweredCs); setBadge('stock', d.stockAlerts); setBadge('late', d.delayed); setBadge('ready', d.pendingShip); setBadge('unpaid', d.unpaid); if (d.statusCounts) { setBadge('waiting', d.statusCounts.waiting); setBadge('shipping', d.statusCounts.shipping); }
   const t = d.series[d.series.length - 1] || {};
   const m = d.modes;
   const week = d.series.slice(-7), prevWeek = d.series.slice(0, 7);
@@ -12,7 +12,8 @@ export async function render(main) {
   const sparkOf = k => spark(d.series.map(x => x[k]), { color: 'var(--s1)' });
   const alerts = [
     { n: d.delayed, label: `출고 지연 (${d.slaHours}시간 초과)`, href: '#/fulfillment' },
-    { n: d.pendingShip, label: '출고 대기 주문', href: '#/orders/ready' },
+    { n: d.pendingShip, label: '배송준비중 주문', href: '#/orders/ready' },
+    { n: d.statusCounts?.waiting || 0, label: '배송대기 주문', href: '#/orders/waiting' },
     { n: d.unpaid, label: '입금전 주문', href: '#/orders/unpaid' },
     { n: d.unansweredCs, label: '답변 필요한 문의', href: '#/cs' },
     { n: d.stockAlerts, label: '재고 확인 필요', href: '#/stock' },

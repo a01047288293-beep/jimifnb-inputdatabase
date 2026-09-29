@@ -5,10 +5,10 @@ import { fmtTime } from './home.js';
 
 export const VIEWS = [
   { id: 'all', label: '전체 주문 조회', desc: '기간 안의 모든 주문', codes: null },
-  { id: 'unpaid', label: '입금전 관리', desc: '주문했지만 아직 결제(입금)되지 않은 주문', codes: ['N00'] },
-  { id: 'ready', label: '배송준비중 관리', desc: '결제 완료 후 출고 전인 주문', codes: ['N10', 'N20', 'N22'], tabs: [['N10', '상품준비중'], ['N20', '배송준비중'], ['N22', '배송보류']], ship: true },
-  { id: 'waiting', label: '배송대기 관리', desc: '송장은 준비됐지만 아직 출발하지 않은 주문', codes: ['N21'], ship: true },
-  { id: 'shipping', label: '배송중 관리', desc: '택배사로 넘어간 주문', codes: ['N30'] },
+  { id: 'unpaid', label: '입금전 관리', desc: '주문했지만 아직 결제(입금)되지 않은 주문', codes: ['N00'], live: true },
+  { id: 'ready', label: '배송준비중 관리', desc: '결제 완료 후 출고 전인 주문', codes: ['N10', 'N20', 'N22'], tabs: [['N10', '상품준비중'], ['N20', '배송준비중'], ['N22', '배송보류']], ship: true, live: true },
+  { id: 'waiting', label: '배송대기 관리', desc: '송장은 준비됐지만 아직 출발하지 않은 주문', codes: ['N21'], ship: true, live: true },
+  { id: 'shipping', label: '배송중 관리', desc: '택배사로 넘어간 주문', codes: ['N30'], live: true },
   { id: 'done', label: '배송완료 조회', desc: '배송이 끝났거나 구매확정된 주문', codes: ['N40', 'N50'] },
   { id: 'claims', label: '취소·교환·반품', desc: '취소·교환·반품 신청과 처리 현황', prefix: ['C', 'E', 'R'], tabs: [['C', '취소'], ['E', '교환'], ['R', '반품']] }
 ];
@@ -22,6 +22,10 @@ const AMOUNT_LABEL = {
   points_spent_amount: '포인트 사용', credits_spent_amount: '예치금 사용', naverpay_point: '네이버페이 포인트', total_amount_due: '결제 예정 금액', payment_amount: '실제 결제금액'
 };
 let carriersCache = null;
+export function applyBadges(c) {
+  if (!c) return;
+  setBadge('unpaid', c.unpaid); setBadge('ready', c.ready); setBadge('waiting', c.waiting); setBadge('shipping', c.shipping);
+}
 
 export async function render(main, { args, query }) {
   const vid = args[0] || LEGACY[query.get('group')] || 'all';
@@ -32,9 +36,11 @@ export async function render(main, { args, query }) {
     from: query.get('from') || addDays(today, -(defDays - 1)), to: query.get('to') || today,
     basis: query.get('basis') === 'pay' ? 'pay' : 'order', tab: query.get('tab') || '', q: query.get('q') || ''
   };
-  const d = await api(`/api/orders?from=${st.from}&to=${st.to}&basis=${st.basis}`);
-  const counts = Object.fromEntries(VIEWS.map(v => [v.id, d.orders.filter(o => inView(v, o)).length]));
-  setBadge('unpaid', counts.unpaid); setBadge('ready', counts.ready + counts.waiting);
+  // 입금전·배송준비중·배송대기·배송중은 카페24 '오늘의 할 일'처럼 주문일과 관계없이 지금 그 상태인 주문 전부
+  const active = await api(`/api/orders/active${query.get('fresh') ? '?fresh=1' : ''}`);
+  const d = view.live ? { orders: active.orders, mode: active.mode } : await api(`/api/orders?from=${st.from}&to=${st.to}&basis=${st.basis}`);
+  const counts = Object.fromEntries(VIEWS.map(v => [v.id, v.live ? active.orders.filter(o => inView(v, o)).length : view.live ? null : d.orders.filter(o => inView(v, o)).length]));
+  applyBadges(active.counts);
   const selected = new Set();
 
   const draw = () => {
@@ -48,15 +54,19 @@ export async function render(main, { args, query }) {
     selected.clear();
 
     main.innerHTML = `
-    ${pageHead(view.label, `${esc(view.desc)} · ${st.basis === 'order' ? '주문일' : '결제일'} 기준 ${srcTag(d.mode)}`, `<a class="btn small" href="https://${esc(state.shop.mallId)}.cafe24.com/disp/admin/shop1/main/dashboard" target="_blank" rel="noopener">카페24 관리자 ↗</a>`)}
+    ${pageHead(view.label, `${esc(view.desc)} · ${view.live ? '기간과 관계없이 지금 이 상태인 주문 전부 (최근 12개월)' : (st.basis === 'order' ? '주문일' : '결제일') + ' 기준'} ${srcTag(d.mode)}`, `<a class="btn small" href="https://${esc(state.shop.mallId)}.cafe24.com/disp/admin/shop1/main/dashboard" target="_blank" rel="noopener">카페24 관리자 ↗</a>`)}
     <div class="stack">
-      <div class="seg" id="o-views" style="align-self:flex-start">${VIEWS.map(v => `<button data-v="${v.id}" aria-pressed="${v.id === view.id}">${esc(v.label.replace(' 관리', '').replace(' 조회', ''))} <span class="num muted">${counts[v.id]}</span></button>`).join('')}</div>
-      <div class="toolbar">
+      <div class="seg" id="o-views" style="align-self:flex-start">${VIEWS.map(v => `<button data-v="${v.id}" aria-pressed="${v.id === view.id}">${esc(v.label.replace(' 관리', '').replace(' 조회', ''))} ${counts[v.id] == null ? '' : `<span class="num muted">${counts[v.id]}</span>`}</button>`).join('')}</div>
+      ${view.live ? `<div class="toolbar">
+        <input type="search" id="o-q" placeholder="주문번호·상품명·주문자 검색" value="${esc(st.q)}" style="max-width:240px" aria-label="검색">
+        <button class="btn small" id="o-fresh">지금 새로 받기</button>
+        <span class="hint">${active.at ? `${esc(fmtTime(new Date(active.at).toISOString()))} 기준 · ` : ''}카페24 대시보드 '오늘의 할 일' 숫자와 같은 기준입니다</span>
+      </div>` : `<div class="toolbar">
         <div class="seg" id="o-basis"><button data-b="order" aria-pressed="${st.basis === 'order'}">주문일</button><button data-b="pay" aria-pressed="${st.basis === 'pay'}">결제일</button></div>
         <div class="seg" id="o-quick"><button data-d="0">오늘</button><button data-d="6">7일</button><button data-d="29">1개월</button><button data-d="89">3개월</button></div>
         <input type="date" id="o-from" value="${st.from}" max="${today}" aria-label="시작일"><span class="muted">~</span><input type="date" id="o-to" value="${st.to}" max="${today}" aria-label="종료일">
         <input type="search" id="o-q" placeholder="주문번호·상품명·주문자 검색" value="${esc(st.q)}" style="max-width:240px" aria-label="검색">
-      </div>
+      </div>`}
       ${view.tabs ? `<div class="seg" id="o-tabs" style="align-self:flex-start"><button data-t="" aria-pressed="${!st.tab}">전체</button>${view.tabs.map(([c, l]) => `<button data-t="${c}" aria-pressed="${st.tab === c}">${l} <span class="num muted">${d.orders.filter(o => inView(view, o) && inTab(view, o, c)).length}</span></button>`).join('')}</div>` : ''}
       <section class="box">
         <div class="box-h"><h2>${nf(list.length)}건</h2>
@@ -72,13 +82,13 @@ export async function render(main, { args, query }) {
             <td class="hint" style="white-space:nowrap">${esc(fmtTime(timeOf(o)))}</td>
             <td><button class="btn ghost small" style="color:var(--accent-2);padding:0" data-open="${esc(o.id)}">${esc(o.id)}</button></td>
             <td>${shopLink(first.productNo, first.name || '')}${o.items.length > 1 ? ` <span class="hint">외 ${o.items.length - 1}건</span>` : ''}${first.option ? `<div class="hint">${esc(first.option)}</div>` : ''}</td>
-            <td class="n">${nf(qty)}</td><td class="n">${won(o.orderAmount ?? o.amount)}</td><td class="n">${o.paid === false ? '<span class="muted">결제 전</span>' : won(o.amount)}</td>
+            <td class="n">${nf(qty)}</td><td class="n">${won(o.orderAmount ?? o.amount)}</td><td class="n">${o.paid === false ? '<span class="muted">결제 전</span>' : won(o.amount)}${(o.points || 0) + (o.credits || 0) > 0 ? `<div class="hint">${o.credits ? `선불금 ${won(o.credits)}` : ''}${o.credits && o.points ? ' · ' : ''}${o.points ? `적립금 ${won(o.points)}` : ''} 포함</div>` : ''}</td>
             <td>${esc(o.payment || '')}</td><td>${esc(o.buyer)}</td>
             <td><span class="pill ${tone(o.status)}">${esc(o.statusLabel)}</span>${o.tracking ? `<div class="hint">${esc(o.tracking.trackingNo || '')}</div>` : ''}</td>
             <td>${canShip ? `<button class="btn small" data-ship="${esc(o.id)}">송장 입력</button>` : ''}</td></tr>`;
         }).join('')}</tbody></table></div>` : '<div class="empty">해당하는 주문이 없습니다.</div>'}
       </section>
-      <div class="hint">주문금액은 (판매가+옵션가)×수량+배송비로 할인 전 금액이고, 결제금액은 할인·적립금을 뺀 실제 결제액입니다. 카페24 숫자와 맞춰 볼 때는 <a href="#/reconcile">매출 대조</a>를 보세요. 주문번호를 누르면 상세가 열립니다.</div>
+      <div class="hint">주문금액은 (판매가+옵션가)×수량+배송비로 할인 전 금액이고, 결제금액은 쿠폰·회원 할인을 뺀 금액입니다(카드·계좌 결제에 선불금·적립금 사용분 포함, 카페24 '결제'와 같은 기준). 카페24 숫자와 맞춰 볼 때는 <a href="#/reconcile">매출 대조</a>를 보세요. 주문번호를 누르면 상세가 열립니다.</div>
     </div>`;
     bind(list);
   };
@@ -88,8 +98,10 @@ export async function render(main, { args, query }) {
     main.querySelectorAll('#o-views button').forEach(b => b.onclick = () => go(`#/orders/${b.dataset.v}?from=${st.from}&to=${st.to}&basis=${st.basis}`));
     main.querySelectorAll('#o-basis button').forEach(b => b.onclick = () => go(url({ basis: b.dataset.b })));
     main.querySelectorAll('#o-quick button').forEach(b => b.onclick = () => go(url({ from: addDays(today, -Number(b.dataset.d)), to: today })));
-    main.querySelector('#o-from').onchange = e => go(url({ from: e.target.value }));
-    main.querySelector('#o-to').onchange = e => go(url({ to: e.target.value }));
+    const fromEl = main.querySelector('#o-from'), toEl = main.querySelector('#o-to'), fresh = main.querySelector('#o-fresh');
+    if (fromEl) fromEl.onchange = e => go(url({ from: e.target.value }));
+    if (toEl) toEl.onchange = e => go(url({ to: e.target.value }));
+    if (fresh) fresh.onclick = () => go(url({}) + '&fresh=1&r=' + Date.now());
     main.querySelectorAll('#o-tabs button').forEach(b => b.onclick = () => { st.tab = b.dataset.t; draw(); });
     const qi = main.querySelector('#o-q');
     let t; qi.oninput = () => { clearTimeout(t); t = setTimeout(() => { st.q = qi.value; const pos = qi.selectionStart; draw(); const n = main.querySelector('#o-q'); n.focus(); n.setSelectionRange(pos, pos); }, 250); };

@@ -186,3 +186,22 @@ test('카페24 연결: 키 없으면 안내, 잘못된 state 거부', async () =
   assert.equal((await call('GET', '/api/없는주소')).status, 404);
   assert.equal((await call('POST', '/api/logout')).status, 200);
 });
+
+test('주문관리: 상태별 건수는 기간과 무관, 환불·결제 대조', async () => {
+  const a = await call('GET', '/api/orders/active');
+  assert.equal(a.status, 200);
+  const c = a.json.counts;
+  assert.equal(c.ready, a.json.orders.filter(o => ['N10', 'N20', 'N22'].includes(o.status)).length);
+  assert.equal(c.waiting, a.json.orders.filter(o => o.status === 'N21').length);
+  assert.ok(a.json.orders.every(o => !['N40', 'N50'].includes(o.status)), '완료 주문 제외');
+  const home = await call('GET', '/api/home');
+  assert.equal(home.json.pendingShip, c.ready, '홈 배송준비중 = 상태 건수');
+  assert.equal(home.json.statusCounts.waiting, c.waiting);
+  const rec = await call('GET', '/api/reconcile?from=2026-09-01&to=2026-09-29');
+  const T = rec.json.total;
+  assert.ok(T.refundCount > 0 && T.refundAmount > 0, '환불 칸');
+  assert.equal(T.net, T.payAmount - T.refundAmount);
+  assert.ok(T.payCredits > 0, '선불금 포함');
+  const f = await call('GET', '/api/insights/fulfillment?from=2026-09-01&to=2026-09-29');
+  assert.ok(f.json.delayed.every(o => o.status !== 'N21'), '배송대기는 지연에서 제외');
+});

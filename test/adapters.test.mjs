@@ -212,3 +212,21 @@ test('카페24 만료 시각: 시간대 없는 값은 한국시간으로 해석'
   assert.equal(C.parseCafe24Time('2026-09-29T08:00:00Z', 0), Date.parse('2026-09-29T08:00:00Z'));
   assert.equal(C.parseCafe24Time('', 5), 5); assert.equal(C.parseCafe24Time('garbage', 7), 7);
 });
+
+test('카페24: 결제금액에 선불금·적립금 포함, 환불 변환·조회', async () => {
+  const o = C.normalizeOrder({ order_id: 'x1', order_date: '2026-09-28T10:00:00+09:00', payment_date: '2026-09-28T10:01:00+09:00', paid: 'T', payment_amount: '11900.00',
+    actual_order_amount: { payment_amount: '11900.00', credits_spent_amount: '22000.00', points_spent_amount: '1000.00', shipping_fee: '0' },
+    items: [{ order_item_code: 'a', product_no: 101, product_name: '불고기', quantity: 1, product_price: '34900.00', order_status: 'N21' }] });
+  assert.equal(o.amount, 34900); assert.equal(o.cash, 11900); assert.equal(o.credits, 22000); assert.equal(o.points, 1000); assert.equal(o.orderAmount, 34900);
+  const allCredit = C.normalizeOrder({ order_id: 'x2', payment_date: '2026-09-28', payment_amount: '0', actual_order_amount: { credits_spent_amount: '5000' }, items: [{ product_price: '9000', quantity: 1 }] });
+  assert.equal(allCredit.amount, 5000, '선불금으로만 결제해도 결제금액 = 선불금');
+  const r = C.normalizeRefund({ refund_code: 'R1', order_id: 'x1', refund_date: '2026-09-29 13:00:00', actual_refund_amount: '11900', used_credits: '22000', refund_status: 'T' });
+  assert.deepEqual({ date: r.date, amount: r.amount, done: r.done }, { date: '2026-09-29', amount: 33900, done: true });
+  on('/admin/refunds?', url => {
+    const q = new URL(url).searchParams;
+    assert.equal(q.get('date_type'), 'refund_date');
+    return { refunds: [{ refund_code: 'R1', order_id: 'x1', refund_date: '2026-09-29 13:00:00', actual_refund_amount: '92600', refund_status: 'T' }, { refund_code: 'R2', order_id: 'x3', refund_date: '', actual_refund_amount: '5000', refund_status: 'F' }] };
+  });
+  const list = await C.fetchRefunds('2026-09-23', '2026-09-29');
+  assert.equal(list.length, 1, '환불 완료만'); assert.equal(list[0].amount, 92600);
+});

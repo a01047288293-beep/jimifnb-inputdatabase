@@ -76,9 +76,11 @@ route('GET', '/api/home', async () => {
   const nowMin = nowK.getUTCHours() * 60 + nowK.getUTCMinutes();
   const yday = addDays(today, -1);
   const ySame = I.summary(orders.filter(o => o.date === yday && (() => { const [, h] = I.kstParts(o); const m = Number(String(o.time).slice(14, 16)) || 0; return h * 60 + m <= nowMin; })()));
-  const recent = await safe('출고 대기', () => data.ordersLive(addDays(today, -13), today, 'order'), []);
-  const pendingShip = recent.filter(o => ['N10', 'N20', 'N21', 'N22'].includes(o.status)).length;
-  const unpaid = recent.filter(o => o.status === 'N00').length;
+  // 카페24 '오늘의 할 일'과 같은 기준: 주문일과 관계없이 지금 그 상태인 주문 수
+  const recent = (await safe('처리할 주문', () => data.activeOrders(), { orders: [] })).orders;
+  const statusCounts = countStatus(recent);
+  const pendingShip = statusCounts.ready;
+  const unpaid = statusCounts.unpaid;
   const delayed = I.fulfillmentInsights(recent, { slaHours: settings.shipSlaHours }).delayed.length;
   const cs = await safe('문의', () => data.articles(addDays(today, -29), today), []);
   const inv = await safe('재고', () => data.inventory(), []);
@@ -87,7 +89,7 @@ route('GET', '/api/home', async () => {
   const pi = I.productInsights(weekOrders, [], inv, week, idx);
   const camp = A.campaignSummary(ads.campaigns, ads.rows.filter(r => r.date >= week[0]), settings.campaignLinks || {}, products);
   return json({
-    today, series, ySame, pendingShip, unpaid, delayed, slaHours: settings.shipSlaHours,
+    today, series, ySame, pendingShip, unpaid, delayed, statusCounts, slaHours: settings.shipSlaHours,
     unansweredCs: cs.filter(a => !a.answered).length, stockAlerts: pi.alerts,
     badAds: camp.filter(c => c.verdict === 'bad' && c.status === 'on').length,
     mtd: I.summary(orders.filter(o => o.date >= monthStart)), prevMtd: I.summary(prevMonth), monthLabel: `${Number(today.slice(5, 7))}월`,
@@ -105,37 +107,62 @@ route('GET', '/api/orders', async (req, s, url) => {
   const key = o => (basis === 'order' ? o.orderedAt || o.time : o.time);
   return json({ from, to, basis, orders: orders.map(o => ({ ...o, statusLabel: C.statusLabel(o.status) })).sort((a, b) => (key(a) < key(b) ? 1 : -1)), mode: await data.mode('cafe24') });
 });
+/** 지금 처리할 상태인 주문 전부 (입금전·배송준비중·배송대기·배송중·클레임 접수). 기간과 무관 */
+route('GET', '/api/orders/active', async (req, s, url) => {
+  const r = await data.activeOrders(url.searchParams.get('fresh') === '1');
+  const orders = r.orders.map(o => ({ ...o, statusLabel: C.statusLabel(o.status) })).sort((a, b) => ((a.orderedAt || a.time) < (b.orderedAt || b.time) ? 1 : -1));
+  return json({ orders, counts: countStatus(r.orders), at: r.at, mode: await data.mode('cafe24') });
+});
 route('GET', '/api/orders/:id', async (req, s, url, p) => {
   const o = await data.orderDetail(decodeURIComponent(p.id));
   return json({ ...o, statusLabel: C.statusLabel(o.status), items: o.items.map(i => ({ ...i, statusLabel: C.statusLabel(i.status) })) });
 });
+function countStatus(list) {
+  const c = { unpaid: 0, ready: 0, prep: 0, waiting: 0, hold: 0, shipping: 0, cancelReq: 0, returnReq: 0, exchangeReq: 0 };
+  for (const o of list) {
+    const st = String(o.status);
+    if (st === 'N00') c.unpaid++;
+    else if (st === 'N10' || st === 'N20' || st === 'N22') { c.ready++; if (st === 'N10') c.prep++; if (st === 'N22') c.hold++; }
+    else if (st === 'N21') c.waiting++;
+    else if (st === 'N30') c.shipping++;
+    else if (st[0] === 'C') c.cancelReq++;
+    else if (st[0] === 'R') c.returnReq++;
+    else if (st[0] === 'E') c.exchangeReq++;
+  }
+  return c;
+}
 /** 카페24 대시보드와 숫자 대조: 같은 기간을 주문일·결제일 두 기준으로 받아 차이 항목별로 나눔 */
 route('GET', '/api/reconcile', async (req, s, url) => {
   const { from, to, today } = range(url, 31, 7);
   const byOrder = await data.ordersLive(from, to, 'order');
   const byPay = await data.ordersLive(from, to, 'pay');
+  let refunds = [], refundError = null;
+  try { refunds = await data.refunds(from, to); } catch (e) { refundError = e.message; }
   const days = dateRange(from, [to, today].sort()[0]);
   const isClaim = o => o.canceled || /^[CR]/.test(String(o.status));
   const rows = days.map(d => {
     const od = byOrder.filter(o => (o.orderDate || o.date) === d);
     const pd = byPay.filter(o => o.date === d);
     const valid = pd.filter(o => !isClaim(o));
+    const rd = refunds.filter(r => r.date === d);
     const sum = (arr, f) => arr.reduce((t, o) => t + num(f(o)), 0);
     return {
       date: d,
-      orderCount: od.length,
+      orderCount: od.length, orderTotal: sum(od, o => o.orderAmount ?? o.amount),
       orderAmount: sum(od.filter(o => !isClaim(o)), o => o.orderAmount ?? o.amount),
       unpaidCount: od.filter(o => !o.paid && !isClaim(o)).length, unpaidAmount: sum(od.filter(o => !o.paid && !isClaim(o)), o => o.orderAmount ?? o.amount),
       claimCount: od.filter(isClaim).length, claimAmount: sum(od.filter(isClaim), o => o.orderAmount ?? o.amount),
-      payCount: pd.length, payAmount: sum(pd, o => o.amount),
+      payCount: pd.length, payAmount: sum(pd, o => o.amount), payCredits: sum(pd, o => num(o.points) + num(o.credits)),
+      refundCount: new Set(rd.map(r => r.orderId || r.code)).size, refundAmount: sum(rd, r => r.amount),
       oursCount: valid.length, ours: sum(valid, o => o.amount),
       discount: sum(valid, o => Math.max(0, num(o.orderAmount ?? o.amount) - num(o.amount))),
       crossDay: pd.filter(o => o.orderDate && o.orderDate !== o.date).length
     };
   });
   const tot = k => rows.reduce((t, r) => t + r[k], 0);
-  const keys = ['orderCount', 'orderAmount', 'unpaidCount', 'unpaidAmount', 'claimCount', 'claimAmount', 'payCount', 'payAmount', 'oursCount', 'ours', 'discount', 'crossDay'];
-  return json({ from, to, rows, total: Object.fromEntries(keys.map(k => [k, tot(k)])), sync: (await getJSON('status/sync'))?.at || null, mode: await data.mode('cafe24') });
+  for (const r of rows) r.net = r.payAmount - r.refundAmount;
+  const keys = ['orderCount', 'orderTotal', 'orderAmount', 'unpaidCount', 'unpaidAmount', 'claimCount', 'claimAmount', 'payCount', 'payAmount', 'payCredits', 'refundCount', 'refundAmount', 'net', 'oursCount', 'ours', 'discount', 'crossDay'];
+  return json({ from, to, rows, total: Object.fromEntries(keys.map(k => [k, tot(k)])), refundError, refundSample: refunds[0]?.numeric || null, sync: (await getJSON('status/sync'))?.at || null, mode: await data.mode('cafe24') });
 });
 route('GET', '/api/carriers', async () => json(await data.carriers()));
 route('POST', '/api/orders/:id/shipment', async (req, s, url, p) => {
@@ -226,7 +253,7 @@ route('GET', '/api/insights/fulfillment', async (req, s, url) => {
   const settings = await data.getSettings();
   const orders = await data.ordersForStats(from, to);
   // 지연 주문은 현재 상태가 중요해 최근 14일을 실시간으로
-  const live = await data.ordersLive(addDays(today, -13), today, 'order').catch(() => []);
+  const live = (await data.activeOrders().catch(() => ({ orders: [] }))).orders;
   const days = dateRange(from, [to, today].sort()[0]);
   const f = I.fulfillmentInsights(orders, { slaHours: settings.shipSlaHours, days });
   f.delayed = I.fulfillmentInsights(live, { slaHours: settings.shipSlaHours }).delayed;

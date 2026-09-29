@@ -116,8 +116,12 @@ export function normalizeOrder(o) {
     claimReason: pick(it.claim_reason, it.claim_reason_type, null)
   }));
   const status = o.order_status || items[0]?.status || '';
-  const amount = num(o.payment_amount) || num(o.actual_order_amount?.payment_amount) || num(o.actual_order_amount?.total_amount_due)
-    || items.reduce((s, i) => s + i.price * i.qty, 0);
+  const aoa = o.actual_order_amount || {};
+  // 카페24 대시보드 '결제' = 실결제(카드·계좌 등) + 적립금 + 예치금(선불금). 쿠폰·회원 할인만 빠짐
+  const cash = num(pick(o.payment_amount, aoa.payment_amount, aoa.total_amount_due, 0));
+  const points = num(pick(aoa.points_spent_amount, aoa.mileage_spent_amount, o.points_spent_amount, 0));
+  const credits = num(pick(aoa.credits_spent_amount, aoa.deposit_spent_amount, o.credits_spent_amount, 0));
+  const amount = (cash || points || credits) ? cash + points + credits : items.reduce((s, i) => s + i.price * i.qty, 0);
   const pay = o.payment_date || o.order_date || '';
   const shippingFee = num(o.shipping_fee ?? o.actual_order_amount?.shipping_fee);
   // 카페24 대시보드의 '주문 금액'과 같은 방식: (판매가+옵션가)×수량 + 배송비 (할인·적립금 차감 전)
@@ -129,7 +133,7 @@ export function normalizeOrder(o) {
   return {
     id: o.order_id, date: String(pay).slice(0, 10), time: pay, orderedAt: o.order_date || pay,
     orderDate: String(o.order_date || pay).slice(0, 10), paid: o.paid === 'T' || (o.paid == null && Boolean(o.payment_date)), status,
-    amount, orderAmount, amounts, shippingFee,
+    amount, cash, points, credits, orderAmount, amounts, shippingFee,
     buyer: maskName(o.buyer_name || o.buyer?.name || ''),
     canceled: o.canceled === 'T' || String(status).startsWith('C'),
     channel: o.order_place_name || o.order_place_id || '',
@@ -142,14 +146,16 @@ export function normalizeOrder(o) {
   };
 }
 /** 결제일 기준 주문 목록 (카페24는 한 번에 최대 3개월, 페이지당 100건) */
-export async function fetchOrders(from, to, dateType = 'pay_date') {
+export async function fetchOrders(from, to, dateType = 'pay_date', status = null) {
   const e = env();
   const out = [];
   let chunkFrom = from;
   while (chunkFrom <= to) {
     const chunkTo = [addDays(chunkFrom, 88), to].sort()[0];
     for (let offset = 0; offset <= 15000; offset += 100) {
-      const data = await call('orders', { query: { shop_no: e.shopNo, start_date: chunkFrom, end_date: chunkTo, date_type: dateType, embed: 'items,receivers,cancellation,return', limit: 100, offset } });
+      const query = { shop_no: e.shopNo, start_date: chunkFrom, end_date: chunkTo, date_type: dateType, embed: 'items,receivers,cancellation,return', limit: 100, offset };
+      if (status) query.order_status = status;
+      const data = await call('orders', { query });
       const list = data?.orders || [];
       for (const o of list) out.push(normalizeOrder(o));
       if (list.length < 100) break;
@@ -158,6 +164,39 @@ export async function fetchOrders(from, to, dateType = 'pay_date') {
   }
   return out;
 }
+/** 지금 해당 상태인 주문 전부 (카페24 '오늘의 할 일'처럼 주문일과 무관). 최근 12개월을 3개월씩 나눠 조회 */
+export const ACTIVE_CODES = ['N00', 'N10', 'N20', 'N21', 'N22', 'N30', 'C00', 'C10', 'C34', 'R00', 'R10', 'R12', 'E00', 'E10', 'E12'];
+export async function fetchActiveOrders(today, months = 12) {
+  const from = addDays(today, -Math.round(months * 30.5));
+  const list = await fetchOrders(from, today, 'order_date', ACTIVE_CODES.join(','));
+  const seen = new Set();
+  return list.filter(o => !seen.has(o.id) && seen.add(o.id));
+}
+/** 환불 완료일 기준 환불 목록 (카페24 대시보드 '환불' 칸과 같은 기준) */
+export function normalizeRefund(r) {
+  const cash = num(pick(r.actual_refund_amount, r.refund_amount, r.total_refund_amount, 0));
+  const points = num(pick(r.used_points, r.refund_point, r.refund_points, 0));
+  const credits = num(pick(r.used_credits, r.refund_credit, r.refund_credits, 0));
+  const when = String(pick(r.refund_date, r.accepted_refund_date, r.refund_accepted_date, '') || '');
+  const numeric = {};
+  for (const [k, v] of Object.entries(r)) if (v != null && v !== '' && typeof v !== 'object' && isFinite(Number(v)) && /amount|point|credit|price|fee/.test(k)) numeric[k] = Number(v);
+  return { code: r.refund_code || '', orderId: r.order_id || '', date: when.slice(0, 10), amount: cash + points + credits, cash, points, credits, done: r.refund_status == null ? true : r.refund_status === 'T' || /complete|done|T/.test(String(r.refund_status)), numeric };
+}
+export async function fetchRefunds(from, to) {
+  const e = env();
+  const out = [];
+  for (let offset = 0; offset <= 5000; offset += 100) {
+    const q = { shop_no: e.shopNo, start_date: from, end_date: to, date_type: 'refund_date', limit: 100, offset };
+    let data;
+    try { data = await call('refunds', { query: q }); }
+    catch (err) { if (offset === 0 && err.status === 422) { delete q.date_type; data = await call('refunds', { query: q }); } else throw err; }
+    const list = data?.refunds || [];
+    for (const r of list) out.push(normalizeRefund(r));
+    if (list.length < 100) break;
+  }
+  return out.filter(r => r.done);
+}
+
 /** 주문 1건 상세 (받는 분 정보는 화면에만 보여주고 저장하지 않음) */
 export async function fetchOrderDetail(orderId) {
   const data = await call(`orders/${encodeURIComponent(orderId)}`, { query: { shop_no: env().shopNo, embed: 'items,receivers,buyer,cancellation,return' } });

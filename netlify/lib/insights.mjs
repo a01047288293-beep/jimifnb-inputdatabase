@@ -188,7 +188,7 @@ export function fulfillmentInsights(orders, { now = Date.now(), slaHours = 48, d
       if (Number.isFinite(delivered) && delivered >= shipped) deliver.push((delivered - shipped) / H);
     }
   }
-  const delayed = orders.filter(o => ['N10', 'N20', 'N21', 'N22'].includes(o.status) && Number.isFinite(Date.parse(o.time)) && now - Date.parse(o.time) > slaHours * H)
+  const delayed = orders.filter(o => ['N10', 'N20', 'N22'].includes(o.status) && Number.isFinite(Date.parse(o.time)) && now - Date.parse(o.time) > slaHours * H)
     .map(o => ({ id: o.id, time: o.time, hours: (now - Date.parse(o.time)) / H, status: o.status, product: o.items[0]?.name || '', more: o.items.length - 1, buyer: o.buyer }))
     .sort((a, b) => b.hours - a.hours);
   const claimsOf = t => orders.filter(o => String(o.status).startsWith(t) || (t === 'C' && o.canceled));
