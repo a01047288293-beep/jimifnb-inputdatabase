@@ -85,6 +85,8 @@ function freshEnough(d, hit, today, recentTtl = 10 * 60000) {
   const age = Date.now() - hit.at;
   if (d >= addDays(today, -1)) return age < recentTtl;
   if (d >= addDays(today, -14)) return age < 6 * 3600000;
+  // 반품·취소는 한 달 넘게 지나서도 생기므로 45일까지는 하루 한 번 다시 확인
+  if (d >= addDays(today, -45)) return age < 24 * 3600000;
   return true;
 }
 async function inBatches(items, size, fn) {
@@ -104,7 +106,7 @@ async function cachedDaily(prefix, from, to, fetchRange, { maxFetch = 400, recen
   const need = [];
   for (const d of days) { const m = DAY_MEM.get(`${prefix}/${d}`); if (m && freshEnough(d, m, today, recentTtl)) hits[d] = m; else need.push(d); }
   // 보름 넘게 지난 날짜는 달 단위 묶음(1번 읽기)으로 먼저 찾음
-  const old = need.filter(d => d < addDays(today, -15));
+  const old = need.filter(d => d < addDays(today, -46));
   const months = [...new Set(old.map(d => d.slice(0, 7)))];
   const packs = {};
   await Promise.all(months.map(async ym => { packs[ym] = DAY_MEM.get(`${prefix}-m/${ym}`) || await getJSON(`${prefix}-m/${ym}`); if (packs[ym]) memPut(`${prefix}-m/${ym}`, packs[ym]); }));
@@ -137,7 +139,7 @@ async function cachedDaily(prefix, from, to, fetchRange, { maxFetch = 400, recen
 /** 다 모인 지난달들을 달 단위 묶음으로 저장 (1년치 조회를 365번 → 12번 읽기로) */
 async function packMonths(prefix, limit = 3) {
   const today = kstDate();
-  const cutoff = addDays(today, -16);
+  const cutoff = addDays(today, -47);
   const keys = new Set((await listKeys(prefix + '/')).map(k => k.slice(prefix.length + 1)));
   const packed = new Set((await listKeys(prefix + '-m/')).map(k => k.slice(prefix.length + 3)));
   const months = [...new Set([...keys].map(d => d.slice(0, 7)))].filter(ym => !packed.has(ym)).sort().reverse();
