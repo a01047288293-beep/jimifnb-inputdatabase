@@ -6,7 +6,7 @@ import * as C from '../lib/cafe24.mjs';
 import * as R from '../lib/rules.mjs';
 import * as A from '../lib/analytics.mjs';
 import { runSync } from '../lib/sync.mjs';
-import { getJSON } from '../lib/store.mjs';
+import { getJSON, setJSON } from '../lib/store.mjs';
 import { draftReply, aiConfigured } from '../lib/ai.mjs';
 import { blankProduct, calc } from '../../public/lib/margin.js';
 import { DEMO_PRODUCTS } from '../lib/demo.mjs';
@@ -44,7 +44,7 @@ route('GET', '/api/me', async (req) => {
 /* ---------- 상태·설정 ---------- */
 route('GET', '/api/status', async () => json({
   modes: await data.modes(), settings: await data.getSettings(), sync: await getJSON('status/sync'),
-  cafe24Token: await C.tokenInfo(), ai: aiConfigured(), today: kstDate(), shop: { url: C.SHOP_URL(), mallId: C.MALL_ID() }
+  cafe24Token: await C.tokenInfo(), cafe24Connect: await getJSON('status/cafe24-connect'), cafe24RedirectUri: process.env.CAFE24_REDIRECT_URI || null, ai: aiConfigured(), today: kstDate(), shop: { url: C.SHOP_URL(), mallId: C.MALL_ID() }
 }));
 route('PUT', '/api/settings', async (req, s) => json(await data.putSettings(await body(req), who(s))));
 route('POST', '/api/sync', async () => json(await runSync('manual')));
@@ -186,17 +186,28 @@ route('GET', '/api/cafe24/connect', async (req) => {
   if (!C.cafe24KeysSet()) throw new HttpError(400, 'CAFE24_MALL_ID, CAFE24_CLIENT_ID, CAFE24_CLIENT_SECRET 환경변수를 먼저 등록하세요.');
   const origin = new URL(req.url).origin;
   const state = signState({ k: 'cafe24' });
-  return new Response(null, { status: 302, headers: { location: C.authorizeUrl(origin + '/api/cafe24/callback', state) } });
+  return new Response(null, { status: 302, headers: { location: C.authorizeUrl(C.redirectUriFor(origin), state) } });
 });
 route('GET', '/api/cafe24/callback', async (req, s, url) => {
   const origin = url.origin;
   const back = (q) => new Response(null, { status: 302, headers: { location: `${origin}/#/settings?cafe24=${q}` } });
+  const redirectUri = C.redirectUriFor(origin);
+  const fail = async (q, message) => {
+    await setJSON('status/cafe24-connect', { at: new Date().toISOString(), ok: false, message: String(message || '').slice(0, 400), redirectUri });
+    return back(q);
+  };
+  // 카페24가 오류를 붙여 돌려보낸 경우 (권한 거부, 주소 불일치 등)
+  if (url.searchParams.get('error')) return fail('fail', `카페24 응답: ${url.searchParams.get('error')} ${url.searchParams.get('error_description') || ''}`);
   const st = verifyState(url.searchParams.get('state'));
-  if (!st || st.k !== 'cafe24') return back('state');
+  if (!st || st.k !== 'cafe24') return fail('state', '연결 요청 확인값(state)이 맞지 않습니다. 설정·연동에서 다시 시도하세요.');
   const code = url.searchParams.get('code');
-  if (!code) return back('denied');
-  try { await C.exchangeCode(code, origin + '/api/cafe24/callback'); await data.addLog({ who: '관리자', kind: '연동', target: '카페24', detail: '연결 완료' }); return back('ok'); }
-  catch (e) { console.error(e); return back('fail'); }
+  if (!code) return fail('denied', '카페24에서 인증 코드를 받지 못했습니다.');
+  try {
+    await C.exchangeCode(code, redirectUri);
+    await setJSON('status/cafe24-connect', { at: new Date().toISOString(), ok: true, message: '', redirectUri });
+    await data.addLog({ who: '관리자', kind: '연동', target: '카페24', detail: '연결 완료' });
+    return back('ok');
+  } catch (e) { console.error(e); return fail('fail', e.message); }
 }, { public: true });
 
 const EXAMPLES = [

@@ -37,6 +37,18 @@ export function authorizeUrl(redirectUri, state) {
   return `https://${e.mall}.cafe24api.com/api/v2/oauth/authorize?${q}`;
 }
 
+/** 카페24는 만료 시각을 시간대 없이(한국시간) 보낼 수 있어 +09:00 을 붙여 해석 */
+export function parseCafe24Time(s, fallbackMs) {
+  if (!s) return fallbackMs;
+  const str = String(s).trim();
+  const withTz = /([zZ]|[+-]\d{2}:?\d{2})$/.test(str) ? str : str.replace(' ', 'T') + '+09:00';
+  const t = Date.parse(withTz);
+  return Number.isFinite(t) ? t : fallbackMs;
+}
+/** 연결에 쓸 Redirect URI (기본: 접속한 주소 기준, 필요하면 CAFE24_REDIRECT_URI 로 고정) */
+export function redirectUriFor(origin) {
+  return process.env.CAFE24_REDIRECT_URI || origin + '/api/cafe24/callback';
+}
 async function tokenRequest(params) {
   const e = env();
   const basic = Buffer.from(`${e.clientId}:${e.secret}`).toString('base64');
@@ -47,9 +59,9 @@ async function tokenRequest(params) {
   });
   const tok = {
     access_token: data.access_token,
-    expires_at: data.expires_at ? Date.parse(data.expires_at) : Date.now() + 7000 * 1000,
+    expires_at: parseCafe24Time(data.expires_at, Date.now() + 7000 * 1000),
     refresh_token: data.refresh_token,
-    refresh_token_expires_at: data.refresh_token_expires_at ? Date.parse(data.refresh_token_expires_at) : Date.now() + 13 * 86400000,
+    refresh_token_expires_at: parseCafe24Time(data.refresh_token_expires_at, Date.now() + 13 * 86400000),
     scopes: data.scopes || null,
     saved_at: Date.now()
   };

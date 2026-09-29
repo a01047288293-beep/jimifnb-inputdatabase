@@ -202,3 +202,10 @@ test('AI 답변 초안 요청 형식', async () => {
   });
   assert.equal(await draftReply({ title: '배송', content: '언제 와요?' }), '안녕하세요, 지미에프앤비입니다.');
 });
+
+test('카페24 만료 시각: 시간대 없는 값은 한국시간으로 해석', () => {
+  assert.equal(C.parseCafe24Time('2026-09-29T17:00:00.000', 0), Date.parse('2026-09-29T08:00:00Z'));
+  assert.equal(C.parseCafe24Time('2026-09-29T17:00:00+09:00', 0), Date.parse('2026-09-29T08:00:00Z'));
+  assert.equal(C.parseCafe24Time('2026-09-29T08:00:00Z', 0), Date.parse('2026-09-29T08:00:00Z'));
+  assert.equal(C.parseCafe24Time('', 5), 5); assert.equal(C.parseCafe24Time('garbage', 7), 7);
+});
