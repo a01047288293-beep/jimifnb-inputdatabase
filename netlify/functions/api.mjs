@@ -38,13 +38,13 @@ route('POST', '/api/login', async (req) => {
 route('POST', '/api/logout', async (req) => json({ ok: true }, 200, { 'set-cookie': logoutCookie(req) }), { public: true });
 route('GET', '/api/me', async (req) => {
   const s = sessionOf(req);
-  return json({ loggedIn: Boolean(s), name: s?.name || null });
+  return json({ loggedIn: Boolean(s), name: s?.name || null, shop: { url: C.SHOP_URL(), mallId: C.MALL_ID() } });
 }, { public: true });
 
 /* ---------- 상태·설정 ---------- */
 route('GET', '/api/status', async () => json({
   modes: await data.modes(), settings: await data.getSettings(), sync: await getJSON('status/sync'),
-  cafe24Token: await C.tokenInfo(), ai: aiConfigured(), today: kstDate()
+  cafe24Token: await C.tokenInfo(), ai: aiConfigured(), today: kstDate(), shop: { url: C.SHOP_URL(), mallId: C.MALL_ID() }
 }));
 route('PUT', '/api/settings', async (req, s) => json(await data.putSettings(await body(req), who(s))));
 route('POST', '/api/sync', async () => json(await runSync('manual')));
@@ -69,7 +69,7 @@ route('GET', '/api/home', async () => {
   return json({
     today, series, pendingShip, unpaid, unansweredCs: cs.filter(a => !a.answered).length,
     productsCount: products.length, logs: (await data.listLogs(8)), sync: await getJSON('status/sync'),
-    modes: await data.modes(), errors
+    modes: await data.modes(), errors, shop: { url: C.SHOP_URL(), mallId: C.MALL_ID() }
   });
 });
 

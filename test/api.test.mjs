@@ -45,6 +45,7 @@ test('쓰기 요청은 전용 헤더 없으면 거부', async () => {
 test('홈·주문·CS·매출 (데모)', async () => {
   const s = await call('GET', '/api/status');
   assert.equal(s.json.modes.cafe24, 'demo');
+  assert.deepEqual(s.json.shop, { url: 'https://www.jimifnb0901.com', mallId: 'jimifnb0901' });
   const h = await call('GET', '/api/home');
   assert.equal(h.status, 200); assert.equal(h.json.series.length, 14); assert.deepEqual(h.json.errors, []);
   const o = await call('GET', '/api/orders?from=2026-09-01&to=2026-09-29');

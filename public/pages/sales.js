@@ -1,4 +1,4 @@
-import { api, esc, won, nf, pctf, roasf, barLineChart, srcTag, kstToday, addDays, go, modal, toast } from '../app.js';
+import { api, esc, won, nf, pctf, roasf, barLineChart, srcTag, kstToday, addDays, go, modal, toast, shopLink } from '../app.js';
 
 export async function render(main, { query }) {
   const today = kstToday();
@@ -30,7 +30,7 @@ export async function render(main, { query }) {
     <section class="box">
       <div class="box-h"><h2>상품별 판매</h2>${unlinked.length ? `<span class="pill warn">원가 미연결 ${unlinked.length}개</span>` : '<span class="pill good">모두 원가 연결됨</span>'}</div>
       ${d.products.length ? `<div class="tbl-wrap"><table><thead><tr><th>카페24 상품</th><th class="n">판매 수량</th><th class="n">매출</th><th>연결된 제품 원가</th><th class="n">1개 원가</th><th class="n">원가율</th><th></th></tr></thead><tbody>
-      ${d.products.map(p => `<tr><td>${esc(p.name)} <span class="hint">#${p.productNo}</span></td><td class="n">${nf(p.qty)}</td><td class="n">${won(p.revenue)}</td>
+      ${d.products.map(p => `<tr><td>${shopLink(p.productNo, p.name)} <span class="hint">#${p.productNo}</span></td><td class="n">${nf(p.qty)}</td><td class="n">${won(p.revenue)}</td>
         <td>${p.linked ? `<a href="#/products/${esc(p.linked.id)}">${esc(p.linked.name)}</a>` : '<span class="pill warn">미연결</span>'}</td>
         <td class="n">${won(p.unitCost)}</td><td class="n">${p.costRate == null ? '–' : `<span class="pill ${p.costRate > 0.7 ? 'bad' : p.costRate > 0.55 ? 'warn' : 'good'}">${pctf(p.costRate, 0)}</span>`}</td>
         <td><button class="btn small" data-link="${p.productNo}">${p.linked ? '변경' : '원가 연결'}</button></td></tr>`).join('')}

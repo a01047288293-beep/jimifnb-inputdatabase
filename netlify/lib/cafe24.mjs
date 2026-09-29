@@ -18,13 +18,16 @@ export function statusLabel(code) {
 
 function env() {
   return {
-    mall: process.env.CAFE24_MALL_ID || '',
+    // 지미에프앤비 자사몰(www.jimifnb0901.com)의 카페24 몰 ID. 다른 몰에 쓸 때만 환경변수로 바꿈
+    mall: process.env.CAFE24_MALL_ID || 'jimifnb0901',
     clientId: process.env.CAFE24_CLIENT_ID || '',
     secret: process.env.CAFE24_CLIENT_SECRET || '',
     version: process.env.CAFE24_API_VERSION || '2026-09-01',
     shopNo: Number(process.env.CAFE24_SHOP_NO || 1)
   };
 }
+export const SHOP_URL = () => (process.env.SHOP_URL || 'https://www.jimifnb0901.com').replace(/\/$/, '');
+export const MALL_ID = () => env().mall;
 export function cafe24KeysSet() { const e = env(); return Boolean(e.mall && e.clientId && e.secret); }
 export async function cafe24Connected() { return cafe24KeysSet() && Boolean(await getJSON(TOKEN_KEY)); }
 

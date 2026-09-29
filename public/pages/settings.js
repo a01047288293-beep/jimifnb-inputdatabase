@@ -2,7 +2,7 @@ import { api, esc, toast, srcTag } from '../app.js';
 import { fmtTime } from './home.js';
 
 const ENV = {
-  cafe24: ['CAFE24_MALL_ID', 'CAFE24_CLIENT_ID', 'CAFE24_CLIENT_SECRET'],
+  cafe24: ['CAFE24_CLIENT_ID', 'CAFE24_CLIENT_SECRET'],
   meta: ['META_ACCESS_TOKEN', 'META_AD_ACCOUNT_ID'],
   google: ['GOOGLE_ADS_DEVELOPER_TOKEN', 'GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_CUSTOMER_ID'],
   tiktok: ['TIKTOK_ACCESS_TOKEN', 'TIKTOK_ADVERTISER_ID'],
@@ -25,6 +25,7 @@ export async function render(main, { query }) {
     ${(m.cafe24 !== 'live' || ['meta', 'google', 'tiktok'].some(p => m[p] !== 'live')) ? '<div class="notice">"데모"로 표시된 영역은 연습용 데이터입니다. 아래 환경변수를 Netlify에 등록하고 다시 배포하면 해당 영역이 실제 데이터로 바뀝니다. 키 값은 채팅이나 문서에 붙여넣지 말고 Netlify 화면에만 입력하세요.</div>' : ''}
     <div class="cols">
       ${card('카페24 쇼핑몰', m.cafe24, `
+        <div>연결 대상: <a href="${esc(s.shop.url)}" target="_blank" rel="noopener">${esc(s.shop.url.replace(/^https?:\/\//, ''))}</a> <span class="hint">(카페24 몰 ID ${esc(s.shop.mallId)})</span></div>
         <div>${m.cafe24 === 'live' ? '연결됨. ' + tokenLine : m.cafe24Keys ? '키가 등록되었습니다. 아래 버튼으로 쇼핑몰 권한을 승인하면 연결이 끝납니다.' : '카페24 개발자센터에서 앱을 만들고 키를 등록하세요.'}</div>
         ${m.cafe24Keys ? `<div><a class="btn ${m.cafe24 === 'live' ? '' : 'primary'}" href="/api/cafe24/connect">${m.cafe24 === 'live' ? '다시 연결' : '카페24 연결하기'}</a></div>` : ''}
         ${envList('cafe24')}<div class="hint">앱의 Redirect URI: <code>${esc(location.origin)}/api/cafe24/callback</code></div>`)}

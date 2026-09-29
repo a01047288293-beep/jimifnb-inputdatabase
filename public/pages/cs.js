@@ -1,4 +1,4 @@
-import { api, esc, srcTag, toast, setBadge, confirmBox } from '../app.js';
+import { api, esc, srcTag, toast, setBadge, confirmBox, shopLink } from '../app.js';
 import { fmtTime } from './home.js';
 
 export async function render(main, { query }) {
@@ -28,6 +28,7 @@ export async function render(main, { query }) {
 
   const detail = a => `<section class="box">
     <div class="box-h"><h2>${esc(a.title)}</h2><span class="hint">${esc(a.boardName)} · ${esc(a.writer)}</span></div>
+    ${a.productNo ? `<div class="hint">관련 상품: ${shopLink(a.productNo, '자사몰에서 상품 보기 ↗')}</div>` : ''}
     <div class="quote">${esc(a.content)}</div>
     ${a.answered ? `<div class="notice info">이미 답변한 문의입니다.${a.reply ? `<div class="quote" style="margin-top:8px">${esc(a.reply)}</div>` : ''}</div>` : `
     <label class="f">답변<textarea id="cs-reply" rows="8" placeholder="고객에게 보낼 답변을 입력하세요."></textarea></label>

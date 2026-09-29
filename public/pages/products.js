@@ -1,5 +1,5 @@
 // 제품·마진: 신제품 연구 파이프라인 + 원가·마진 계산 (마진랩을 시스템에 통합)
-import { api, esc, won, pctf, toast, go, confirmBox, modal } from '../app.js';
+import { api, esc, won, pctf, toast, go, confirmBox, modal, shopLink } from '../app.js';
 import { STAGES, UNITS, calc, targetPrice, monthly, actuals, trialYield, blankProduct, num } from '../lib/margin.js';
 
 const tone = (r, p) => !r.ok ? 'none' : r.margin < 0 ? 'bad' : r.margin * 100 < num(p.targetMargin) ? 'warn' : 'good';
@@ -183,7 +183,7 @@ function renderDetail(main, p) {
     try { shop = shop || await api('/api/shop-products'); }
     catch (e) { area.innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
     const nos = p.cafe24ProductNos.map(Number);
-    area.innerHTML = shop.length ? `<div class="map-list">${shop.map(s => `<label><input type="checkbox" id="m-${s.productNo}" data-map="${s.productNo}" ${nos.includes(s.productNo) ? 'checked' : ''}>${esc(s.name)} <span class="hint">#${s.productNo} · ${won(s.price)}</span></label>`).join('')}</div>` : '<div class="hint">카페24 상품이 없습니다.</div>';
+    area.innerHTML = shop.length ? `<div class="map-list">${shop.map(s => `<label><input type="checkbox" id="m-${s.productNo}" data-map="${s.productNo}" ${nos.includes(s.productNo) ? 'checked' : ''}>${esc(s.name)} <span class="hint">#${s.productNo} · ${won(s.price)} · ${shopLink(s.productNo, '보기 ↗')}</span></label>`).join('')}</div>` : '<div class="hint">카페24 상품이 없습니다.</div>';
   };
   const flush = async () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; await save(); } };
 

@@ -20,6 +20,12 @@ export const $ = (sel, el = document) => el.querySelector(sel);
 
 export function kstToday() { return new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10); }
 export function addDays(ymd, n) { return new Date(Date.parse(ymd + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10); }
+/** 자사몰 상품 페이지 링크 */
+export function shopLink(productNo, label) {
+  const text = esc(label);
+  if (!productNo) return text;
+  return `<a href="${esc(state.shop.url)}/product/detail.html?product_no=${encodeURIComponent(productNo)}" target="_blank" rel="noopener">${text}</a>`;
+}
 export const PLAT = { meta: '메타', google: '구글', tiktok: '틱톡' };
 export const platTag = p => `<span class="plat ${esc(p)}">${esc(PLAT[p] || p)}</span>`;
 export function srcTag(mode) {
@@ -112,7 +118,7 @@ function niceStep(raw) {
 }
 
 /* ---------- 앱 ---------- */
-export const state = { user: null, status: null };
+export const state = { user: null, status: null, shop: { url: 'https://www.jimifnb0901.com', mallId: 'jimifnb0901' } };
 const PAGES = [
   { id: 'home', label: '홈', mod: home },
   { id: 'orders', label: '주문·출고', mod: orders },
@@ -143,7 +149,7 @@ function renderShell() {
     <nav class="side" aria-label="메뉴">
       <div class="brand">지미 운영실<small>(주)지미에프앤비</small></div>
       <div class="nav" id="nav">${PAGES.map(p => p.label ? `<a href="#/${p.id}" data-page="${p.id}">${p.label}${p.badge ? `<span class="badge" id="badge-${p.badge}" hidden></span>` : ''}</a>` : '<div class="nav-sep"></div>').join('')}</div>
-      <div class="side-foot"><span id="who"></span><button class="btn small" id="logout" type="button">로그아웃</button></div>
+      <div class="side-foot"><a id="shop-link" target="_blank" rel="noopener">자사몰 열기 ↗</a><a id="admin-link" target="_blank" rel="noopener">카페24 관리자 ↗</a><span id="who"></span><button class="btn small" id="logout" type="button">로그아웃</button></div>
     </nav>
     <main class="main" id="main"></main></div>`;
   document.getElementById('logout').onclick = async () => { try { await api('/api/logout', { method: 'POST' }); } catch { /* 무시 */ } state.user = null; renderLogin(); };
@@ -155,6 +161,8 @@ async function route() {
   if (!state.user) return;
   renderShell();
   document.getElementById('who').textContent = state.user + ' 님';
+  document.getElementById('shop-link').href = state.shop.url;
+  document.getElementById('admin-link').href = `https://${state.shop.mallId}.cafe24.com/disp/admin/shop1/main/dashboard`;
   const { page, args, query } = parseHash();
   const p = PAGES.find(x => x.id === page && x.mod) || PAGES[0];
   document.querySelectorAll('#nav a').forEach(a => a.setAttribute('aria-current', a.dataset.page === p.id ? 'page' : 'false'));
@@ -194,6 +202,7 @@ window.addEventListener('hashchange', route);
 (async () => {
   try {
     const me = await api('/api/me');
+    if (me.shop) state.shop = me.shop;
     if (me.loggedIn) { state.user = me.name; route(); } else renderLogin();
   } catch (e) { renderLogin(e.message); }
 })();

@@ -183,3 +183,4 @@ textarea{min-height:90px;resize:vertical}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 code{font-family:var(--f-num);font-size:12px;background:var(--sunk);padding:0 4px;border-radius:4px;overflow-wrap:anywhere}
 .rows td select{min-width:64px}
+.side-foot a{color:var(--muted);text-decoration:none}.side-foot a:hover{color:var(--accent)}

@@ -1,5 +1,7 @@
 # 지미 운영실 — (주)지미에프앤비 내부 운영 시스템
 
+연결 쇼핑몰: **www.jimifnb0901.com** (카페24 몰 ID `jimifnb0901`, 기본값으로 설정됨)
+
 카페24 주문·출고·CS·매출, 제품 원가·마진(신제품 연구 파이프라인), 메타·구글·틱톡 광고와 자동 규칙을 한 화면에서 관리합니다.
 Netlify에 배포하며, 서버 기능은 Netlify Functions, 데이터 저장은 Netlify Blobs를 씁니다. 별도 DB나 서버 비용이 없습니다.
 
@@ -40,18 +42,19 @@ Netlify에 배포하며, 서버 기능은 Netlify Functions, 데이터 저장은
 1. [카페24 개발자센터](https://developers.cafe24.com)에서 앱을 만듭니다.
 2. 앱 설정의 **Redirect URI**에 `https://<사이트 주소>/api/cafe24/callback` 을 넣습니다 (설정·연동 화면에 정확한 주소가 나옵니다).
 3. 권한: 주문 읽기/쓰기, 게시판 읽기/쓰기, 상품 읽기, 상점 읽기.
-4. 발급된 값을 Netlify 환경변수에 등록하고 다시 배포합니다.
+4. 발급된 값을 Netlify 환경변수에 등록하고 다시 배포합니다. 몰 ID(`jimifnb0901`)와 자사몰 주소는 이미 들어 있어 넣지 않아도 됩니다.
 
    | 이름 | 값 |
    | --- | --- |
-   | `CAFE24_MALL_ID` | `jimifnb0901` |
    | `CAFE24_CLIENT_ID` | 앱의 Client ID |
    | `CAFE24_CLIENT_SECRET` | 앱의 Client Secret |
+
+   자사몰 도메인(www.jimifnb0901.com)은 카페24 쪽 설정이라 이 시스템 배포와 서로 영향이 없습니다. 운영실은 별도 주소(예: `ops.jimifnb0901.com` 또는 Netlify 주소)로 엽니다.
 
 5. 설정·연동 → **카페24 연결하기** → 카페24에서 권한 승인. 끝나면 "실제"로 표시됩니다.
    연결은 15분마다 자동으로 연장되므로 다시 할 필요가 없습니다(14일 넘게 사이트가 멈춰 있었다면 다시 연결).
 
-선택 환경변수: `CAFE24_CS_BOARDS` (문의 게시판 번호, 쉼표 구분. 비우면 이름에 "문의·Q&A"가 들어간 게시판), `CAFE24_CS_REPLY_MODE` (`reply` 답글 / `comment` 댓글).
+선택 환경변수: `CAFE24_MALL_ID`·`SHOP_URL` (다른 몰에 쓸 때만), `CAFE24_CS_BOARDS` (문의 게시판 번호, 쉼표 구분. 비우면 이름에 "문의·Q&A"가 들어간 게시판), `CAFE24_CS_REPLY_MODE` (`reply` 답글 / `comment` 댓글).
 
 ## 3. 광고 매체 연결
 

@@ -1,4 +1,4 @@
-import { api, esc, won, nf, srcTag, modal, toast, kstToday, addDays, go } from '../app.js';
+import { api, esc, won, nf, srcTag, modal, toast, kstToday, addDays, go, shopLink } from '../app.js';
 
 const GROUPS = [
   { id: 'all', label: '전체', test: () => true },
@@ -41,7 +41,7 @@ export async function render(main, { query }) {
         const canShip = ['N10', 'N20', 'N21', 'N22'].includes(o.status);
         return `<tr>${st.group === 'ready' ? `<td><input type="checkbox" data-sel="${esc(o.id)}" aria-label="선택"></td>` : ''}
           <td class="hint">${esc(String(o.time).slice(5, 16).replace('T', ' '))}</td><td class="num">${esc(o.id)}</td>
-          <td>${esc(first.name || '')}${o.items.length > 1 ? ` <span class="hint">외 ${o.items.length - 1}건</span>` : ''}${first.option ? `<div class="hint">${esc(first.option)}</div>` : ''}</td>
+          <td>${shopLink(first.productNo, first.name || '')}${o.items.length > 1 ? ` <span class="hint">외 ${o.items.length - 1}건</span>` : ''}${first.option ? `<div class="hint">${esc(first.option)}</div>` : ''}</td>
           <td class="n">${nf(qty)}</td><td class="n">${won(o.amount)}</td><td>${esc(o.buyer)}</td>
           <td><span class="pill ${tone(o.status)}">${esc(o.statusLabel)}</span>${o.tracking ? `<div class="hint">${esc(o.tracking.trackingNo || '')}</div>` : ''}</td>
           <td>${canShip ? `<button class="btn small" data-ship="${esc(o.id)}">송장 입력</button>` : ''}</td></tr>`;

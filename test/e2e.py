@@ -31,6 +31,8 @@ with sync_playwright() as p:
         page.click("button[type=submit]")
         expect(page.locator("h1")).to_have_text("오늘 한눈에")
         expect(page.locator("#who")).to_have_text("김민웅 님")
+        assert page.get_attribute("#shop-link", "href") == "https://www.jimifnb0901.com"
+        assert page.get_attribute("#admin-link", "href").startswith("https://jimifnb0901.cafe24.com/")
     run(page, "로그인", login)
 
     def home():
@@ -81,6 +83,8 @@ with sync_playwright() as p:
         assert page.locator("[data-sel]").count() == n - 1, "출고 대기에서 빠져야 함"
         page.click("#o-groups button[data-g=all]")
         expect(page.locator("tbody tr").first).to_be_visible()
+        href = page.locator("tbody a").first.get_attribute("href")
+        assert href.startswith("https://www.jimifnb0901.com/product/detail.html?product_no="), href
         page.screenshot(path=f"{OUT}/04-orders.png", full_page=False)
     run(page, "주문·송장 입력", orders)
 
