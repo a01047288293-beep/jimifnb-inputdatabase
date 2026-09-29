@@ -304,12 +304,16 @@ async function adAnalysis(from, to) {
   const settings = await data.getSettings();
   const products = await data.listProducts();
   const idx = A.productIndex(products);
-  const ads = await data.allAds(from, to);
-  const prevAds = await data.allAds(pFrom, pTo).catch(() => ({ rows: [] }));
-  const cr = await data.allCreatives(from, to);
+  // 매체 성과·이전 기간·소재·주문을 한꺼번에 동시에 받음
+  let orderError = null;
+  const [ads, prevAds, cr, [orders, prevOrders]] = await Promise.all([
+    data.allAds(from, to),
+    data.allAds(pFrom, pTo, { rowsOnly: true }).catch(() => ({ rows: [] })),
+    data.allCreatives(from, to),
+    Promise.all([data.ordersForStats(from, to), data.ordersForStats(pFrom, pTo)]).catch(e => { orderError = e.message; return [[], []]; })
+  ]);
   const errors = [...ads.errors, ...cr.errors.filter(e => !ads.errors.some(x => x.platform === e.platform))];
-  let orders = [], prevOrders = [];
-  try { orders = await data.ordersForStats(from, to); prevOrders = await data.ordersForStats(pFrom, pTo); } catch (e) { errors.push({ platform: 'cafe24', message: e.message }); }
+  if (orderError) errors.push({ platform: 'cafe24', message: orderError });
   const platforms = data.PLATFORMS.filter(p => ads.modes[p] !== 'off');
   const summary = A.campaignSummary(ads.campaigns, ads.rows, settings.campaignLinks || {}, products);
   const ov = AD.overview({ days, rows: ads.rows, prevRows: prevAds.rows, orders, prevOrders, platforms });
@@ -417,7 +421,7 @@ route('POST', '/api/ads/test', async (req) => {
   const p = String(b.platform || '');
   if (!data.PLATFORMS.includes(p)) throw new HttpError(400, '알 수 없는 매체입니다.');
   if ((await data.mode(p)) !== 'live') throw new HttpError(409, '아직 키가 모두 등록되지 않았습니다.');
-  const list = await data.campaigns(p);
+  const list = await data.campaigns(p, { fresh: true });
   return json({ ok: true, count: list.length, on: list.filter(c => c.status === 'on').length, names: list.slice(0, 5).map(c => c.name) });
 });
 

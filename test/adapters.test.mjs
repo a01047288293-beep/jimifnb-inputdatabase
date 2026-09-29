@@ -252,3 +252,16 @@ test('구글: 운영실에서 직접 연결(갱신 토큰 저장), 개발자 토
     process.env.GOOGLE_ADS_DEVELOPER_TOKEN = saved.dev; process.env.GOOGLE_ADS_REFRESH_TOKEN = saved.ref;
   }
 });
+
+test('광고: 캠페인 목록 5분 캐시, 변경 시 즉시 갱신', async () => {
+  let n = 0;
+  handlers.unshift({ match: /graph\.facebook\.com\/v[\d.]+\/act_123\/campaigns/, fn: () => { n++; return { data: [{ id: '9', name: 'c', status: 'ACTIVE', effective_status: 'ACTIVE', daily_budget: '10000' }] }; } });
+  handlers.unshift({ match: /graph\.facebook\.com\/v[\d.]+\/9$/, fn: () => ({ success: true }) });
+  await data.campaigns('meta', { fresh: true });
+  await data.campaigns('meta');
+  assert.equal(n, 1, '두 번째는 캐시');
+  await data.setCampaignStatus('meta', '9', false, '테스트', '');
+  await data.campaigns('meta');
+  assert.equal(n, 2, '끄기 후엔 새로 받음');
+  handlers.shift(); handlers.shift();
+});

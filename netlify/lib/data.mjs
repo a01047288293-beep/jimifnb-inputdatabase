@@ -72,10 +72,10 @@ export async function listLogs(limit = 200) {
 }
 
 /* ---------- 캐시: 날짜별 저장. 최근 2일은 10분, 최근 14일은 6시간마다 새로 받고(상태·반품 변화 반영), 그 이전은 저장본 사용 ---------- */
-function freshEnough(d, hit, today) {
+function freshEnough(d, hit, today, recentTtl = 10 * 60000) {
   if (!hit) return false;
   const age = Date.now() - hit.at;
-  if (d >= addDays(today, -1)) return age < 10 * 60000;
+  if (d >= addDays(today, -1)) return age < recentTtl;
   if (d >= addDays(today, -14)) return age < 6 * 3600000;
   return true;
 }
@@ -83,7 +83,7 @@ async function inBatches(items, size, fn) {
   for (let i = 0; i < items.length; i += size) await Promise.all(items.slice(i, i + size).map(fn));
 }
 /** maxFetch: 한 번에 외부에서 새로 받을 최대 일수 (나머지는 missing 으로 알려줌) */
-async function cachedDaily(prefix, from, to, fetchRange, { maxFetch = 400 } = {}) {
+async function cachedDaily(prefix, from, to, fetchRange, { maxFetch = 400, recentTtl } = {}) {
   const today = kstDate();
   const days = dateRange(from, [to, today].sort()[0]);
   const result = {};
@@ -91,7 +91,7 @@ async function cachedDaily(prefix, from, to, fetchRange, { maxFetch = 400 } = {}
   await inBatches(days, 20, async d => { hits[d] = await getJSON(`${prefix}/${d}`); });
   const stale = [];
   for (const d of days) {
-    if (freshEnough(d, hits[d], today)) result[d] = hits[d].rows;
+    if (freshEnough(d, hits[d], today, recentTtl)) result[d] = hits[d].rows;
     else stale.push(d);
   }
   // 최신 날짜부터 채움
@@ -235,56 +235,68 @@ const LIVE = {
 };
 // ads2: 퍼널(랜딩·장바구니·결제 시작) 지표가 추가돼 새로 모음
 const AD_CACHE = 'cache/ads2';
-export async function campaigns(platform) {
+// 광고 데이터는 자동 수집(15분마다)이 미리 받아두므로, 화면에서는 20분 안의 저장본을 그대로 씀
+const AD_TTL = 20 * 60000;
+/** 캠페인 목록: 5분 캐시 (켜기/끄기·예산 변경 시 즉시 지움) */
+export async function campaigns(platform, { fresh = false } = {}) {
   const m = await mode(platform);
   if (m === 'off') return [];
-  return m === 'demo' ? D.demoCampaigns(platform) : LIVE[platform].campaigns();
+  if (m === 'demo') return D.demoCampaigns(platform);
+  const key = `cache/camps/${platform}`;
+  const hit = fresh ? null : await getJSON(key);
+  if (hit && Date.now() - hit.at < 5 * 60000) return hit.list;
+  const list = await LIVE[platform].campaigns();
+  await setJSON(key, { at: Date.now(), list });
+  return list;
 }
+const dropCampaignCache = p => delKey(`cache/camps/${p}`).catch(() => {});
 export async function adRows(platform, from, to) {
   const m = await mode(platform);
   if (m === 'off') return [];
   if (m === 'demo') return D.demoAdRows(platform, from, to);
-  return cachedDaily(`${AD_CACHE}/${platform}`, from, to, LIVE[platform].rows);
+  return cachedDaily(`${AD_CACHE}/${platform}`, from, to, LIVE[platform].rows, { recentTtl: AD_TTL });
 }
 /** 모든 매체: 실패한 매체는 errors 에 담고 나머지는 계속 */
-export async function allAds(from, to) {
+/** 모든 매체를 동시에 조회 (한 매체가 느려도 나머지는 기다리지 않음). rowsOnly: 이전 기간 비교처럼 성과만 필요할 때 */
+export async function allAds(from, to, { rowsOnly = false } = {}) {
   const out = { campaigns: [], rows: [], errors: [], modes: {} };
-  for (const p of PLATFORMS) {
+  await Promise.all(PLATFORMS.map(async p => {
     out.modes[p] = await mode(p);
-    if (out.modes[p] === 'off') continue;
-    try { out.campaigns.push(...await campaigns(p)); out.rows.push(...await adRows(p, from, to)); }
-    catch (e) { out.errors.push({ platform: p, message: e.message }); }
-  }
+    if (out.modes[p] === 'off') return;
+    try {
+      const [cs, rs] = await Promise.all([rowsOnly ? [] : campaigns(p), adRows(p, from, to)]);
+      out.campaigns.push(...cs); out.rows.push(...rs);
+    } catch (e) { out.errors.push({ platform: p, message: e.message }); }
+  }));
   return out;
 }
 /** 광고(소재) 단위: 일별 성과 + 소재 정보(썸네일·형식) + 기간 빈도. 매체별 실패는 errors 로 */
 export async function allCreatives(from, to) {
   const out = { rows: [], info: {}, reach: {}, errors: [] };
-  for (const p of PLATFORMS) {
+  await Promise.all(PLATFORMS.map(async p => {
     const m = await mode(p);
-    if (m === 'off') continue;
+    if (m === 'off') return;
     try {
       if (m === 'demo') {
         out.rows.push(...await D.demoCreativeRows(p, from, to));
         Object.assign(out.info, prefixKeys(p, await D.demoCreativeInfo(p)));
         Object.assign(out.reach, prefixKeys(p, await D.demoReach(p, from, to)));
-        continue;
+        return;
       }
       const L = LIVE[p];
-      if (!L.adRows) continue;
-      out.rows.push(...await cachedDaily(`cache/adcr/${p}`, from, to, L.adRows));
-      const infoKey = `cache/adinfo/${p}`;
-      let info = await getJSON(infoKey);
-      if (!info || Date.now() - info.at > 60 * 60000) { info = { at: Date.now(), map: await L.adInfo() }; await setJSON(infoKey, info); }
-      Object.assign(out.info, prefixKeys(p, info.map));
-      if (L.reach) {
-        const rk = `cache/adreach/${p}`;
-        let hit = await getJSON(rk);
-        if (!hit || hit.from !== from || hit.to !== to || Date.now() - hit.at > 30 * 60000) { hit = { at: Date.now(), from, to, map: await L.reach(from, to) }; await setJSON(rk, hit); }
-        Object.assign(out.reach, prefixKeys(p, hit.map));
-      }
+      if (!L.adRows) return;
+      // 소재별 성과·소재 정보·기간 빈도를 동시에 받음
+      const infoKey = `cache/adinfo/${p}`, rk = `cache/adreach/${p}/${from}_${to}`;
+      const [rows, info, reach] = await Promise.all([
+        cachedDaily(`cache/adcr/${p}`, from, to, L.adRows, { recentTtl: AD_TTL }),
+        (async () => { let x = await getJSON(infoKey); if (!x || Date.now() - x.at > 60 * 60000) { x = { at: Date.now(), map: await L.adInfo() }; await setJSON(infoKey, x); } return x.map; })(),
+        L.reach ? (async () => { let x = await getJSON(rk); if (!x || Date.now() - x.at > 30 * 60000) { x = { at: Date.now(), map: await L.reach(from, to) }; await setJSON(rk, x); } return x.map; })() : {}
+      ]);
+      out.rows.push(...rows);
+      Object.assign(out.info, prefixKeys(p, info));
+      Object.assign(out.reach, prefixKeys(p, reach));
     } catch (e) { out.errors.push({ platform: p, message: e.message }); }
-  }
+  }));
   return out;
 }
 const prefixKeys = (p, map) => Object.fromEntries(Object.entries(map || {}).map(([k, v]) => [`${p}:${k}`, v]));
@@ -293,6 +305,7 @@ export async function setCampaignStatus(platform, id, on, who, why) {
   const m = await mode(platform);
   if (m === 'off') throw new HttpError(409, '연결되지 않은 매체입니다.');
   if (m === 'live') await LIVE[platform].status(id, on); else await D.demoSetStatus(platform, id, on);
+  await dropCampaignCache(platform);
   let name = id;
   try { name = (await campaigns(platform)).find(c => c.id === String(id))?.name || id; } catch { /* 이름 조회 실패 시 번호로 기록 */ }
   await addLog({ who, kind: on ? '광고 켜기' : '광고 끄기', target: `${PLATFORM_LABEL[platform]} ${name}`, detail: (why || '') + (m === 'demo' ? ' (데모)' : '') });
@@ -305,6 +318,7 @@ export async function setCampaignBudget(platform, id, won, who, why) {
   if (!c) throw new HttpError(404, '캠페인을 찾지 못했습니다.');
   const m = await mode(platform);
   if (m === 'live') await LIVE[platform].budget(c, won); else await D.demoSetBudget(platform, id, won);
+  await dropCampaignCache(platform);
   await addLog({ who, kind: '예산 변경', target: `${PLATFORM_LABEL[platform]} ${c.name}`, detail: `${(c.dailyBudget ?? 0).toLocaleString('ko-KR')}원 → ${Math.round(won).toLocaleString('ko-KR')}원 ${why || ''}${m === 'demo' ? ' (데모)' : ''}`.trim() });
   return c;
 }
