@@ -1,4 +1,4 @@
-import { api, esc, toast, srcTag } from '../app.js';
+import { api, esc, toast, srcTag, platformSwitches, bindPlatformSwitches } from '../app.js';
 import { fmtTime } from './home.js';
 
 const ENV = {
@@ -26,6 +26,9 @@ export async function render(main, { query }) {
     ${msg ? `<div class="notice ${msg[0]}">${msg[1]}${s.cafe24Connect && !s.cafe24Connect.ok && query.get('cafe24') !== 'ok' ? `<div style="margin-top:6px"><b>사유:</b> ${esc(s.cafe24Connect.message || '알 수 없음')}</div><div class="hint">연결에 쓴 Redirect URI: <code>${esc(s.cafe24Connect.redirectUri)}</code></div>` : ''}</div>` : ''}
     ${gmsg ? `<div class="notice ${gmsg[0]}">${gmsg[1]}${s.googleConnect && !s.googleConnect.ok && query.get('google') !== 'ok' ? `<div style="margin-top:6px"><b>사유:</b> ${esc(s.googleConnect.message || '알 수 없음')}</div><div class="hint">연결에 쓴 리디렉션 URI: <code>${esc(s.googleConnect.redirectUri)}</code></div>` : ''}</div>` : ''}
     ${(m.cafe24 !== 'live' || ['meta', 'google', 'tiktok'].some(p => m[p] !== 'live')) ? '<div class="notice">"데모"로 표시된 영역은 연습용 데이터입니다. 아래 환경변수를 Netlify에 등록하고 다시 배포하면 해당 영역이 실제 데이터로 바뀝니다. 키 값은 채팅이나 문서에 붙여넣지 말고 Netlify 화면에만 입력하세요.</div>' : ''}
+    <section class="box"><div class="box-h"><h2>광고 매체 분석 포함</h2><span class="hint">끄면 광고 분석·광고 관리·홈·AI 참모·자동 규칙에서 모두 빠집니다</span></div>
+      ${platformSwitches(m.platforms)}
+      <div class="hint">연결되지 않은 매체는 켤 수 없습니다. 틱톡처럼 아직 광고를 하지 않는 매체는 꺼두고, 연결한 뒤에 켜세요.</div></section>
     <div class="cols">
       ${card('카페24 쇼핑몰', m.cafe24, `
         <div>연결 대상: <a href="${esc(s.shop.url)}" target="_blank" rel="noopener">${esc(s.shop.url.replace(/^https?:\/\//, ''))}</a> <span class="hint">(카페24 몰 ID ${esc(s.shop.mallId)})</span></div>
@@ -61,6 +64,7 @@ export async function render(main, { query }) {
       <div><button class="btn" id="demo-ex">예시 제품 불러오기</button></div></section>` : ''}
   </div>`;
 
+  bindPlatformSwitches(main, () => render(main, { query }));
   main.querySelectorAll('[data-test]').forEach(b => b.onclick = async () => {
     const out = main.querySelector('#t-' + b.dataset.test);
     b.disabled = true; out.textContent = '확인 중…';

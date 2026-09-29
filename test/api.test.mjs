@@ -222,3 +222,22 @@ test('광고 분석 API (데모): 개요·캠페인·소재·퍼널·제품 손�
   assert.equal((await call('POST', '/api/ads/ai-comment', { from: '2026-09-16', to: '2026-09-29' })).status, 409, 'AI 키 없으면 안내');
   assert.equal((await call('GET', '/api/ads/analysis?from=2026-01-01&to=2026-09-29')).status, 400);
 });
+
+test('광고 매체 분석 포함 on/off', async () => {
+  const before = await call('GET', '/api/ads/analysis?from=2026-09-16&to=2026-09-29');
+  assert.ok(before.json.ov.byPlatform.some(p => p.platform === 'tiktok'));
+  const put = await call('PUT', '/api/settings', { adPlatforms: { tiktok: false } });
+  assert.equal(put.status, 200); assert.deepEqual(put.json.adPlatforms, { meta: true, google: true, tiktok: false });
+  const a = await call('GET', '/api/ads/analysis?from=2026-09-16&to=2026-09-29');
+  assert.ok(!a.json.ov.byPlatform.some(p => p.platform === 'tiktok'), '분석에서 빠짐');
+  assert.ok(!a.json.camps.some(c => c.platform === 'tiktok'));
+  assert.equal(a.json.platformStates.tiktok.included, false); assert.equal(a.json.platformStates.meta.included, true);
+  assert.ok(a.json.ov.total.spend < before.json.ov.total.spend);
+  const ads = await call('GET', '/api/ads?from=2026-09-23&to=2026-09-29');
+  assert.ok(!ads.json.campaigns.some(c => c.platform === 'tiktok'));
+  assert.equal((await call('POST', '/api/ads/status', { platform: 'tiktok', id: 't-3001', on: false })).status, 409, '빠진 매체는 조작 불가');
+  const st = await call('GET', '/api/status');
+  assert.equal(st.json.modes.tiktok, 'off'); assert.equal(st.json.modes.platforms.tiktok.canInclude, true);
+  await call('PUT', '/api/settings', { adPlatforms: { tiktok: true } });
+  assert.ok((await call('GET', '/api/ads/analysis?from=2026-09-16&to=2026-09-29')).json.ov.byPlatform.some(p => p.platform === 'tiktok'));
+});

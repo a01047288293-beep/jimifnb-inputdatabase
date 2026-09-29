@@ -1,4 +1,4 @@
-import { api, esc, won, nf, roasf, pctf, platTag, srcTag, toast, modal, confirmBox, kstToday, addDays, go, PLAT } from '../app.js';
+import { api, esc, won, nf, roasf, pctf, platTag, srcTag, toast, modal, confirmBox, kstToday, addDays, go, PLAT, platformSwitches, bindPlatformSwitches } from '../app.js';
 
 const RANGES = [{ id: 'today', label: '오늘', f: 0, t: 0 }, { id: 'yday', label: '어제', f: 1, t: 1 }, { id: '7d', label: '7일', f: 6, t: 0 }, { id: '30d', label: '30일', f: 29, t: 0 }];
 const VERDICT = { good: ['good', '여유'], warn: ['warn', '손익분기 근접'], bad: ['bad', '손익분기 미달'] };
@@ -17,11 +17,12 @@ export async function render(main, { query }) {
   const unlinked = list.filter(c => !c.productId && c.spend > 0).length;
 
   main.innerHTML = `
-  <div class="page-head"><h1>광고 관리 <a class="btn small" href="#/adanalysis" style="margin-left:8px">광고 분석 보기 →</a></h1><span class="hint">${Object.entries(d.modes).map(([p, m]) => PLAT[p] + ' ' + srcTag(m)).join(' ')}</span></div>
+  <div class="page-head"><h1>광고 관리 <a class="btn small" href="#/adanalysis" style="margin-left:8px">광고 분석 보기 →</a></h1></div>
+    <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><span class="hint">분석에 포함할 매체</span>${platformSwitches(d.platformStates)}</div>
   <div class="stack">
     <div class="toolbar">
       <div class="seg" id="a-range">${RANGES.map(x => `<button data-r="${x.id}" aria-pressed="${x.id === R.id}">${x.label}</button>`).join('')}</div>
-      <div class="seg" id="a-plat"><button data-p="all" aria-pressed="${plat === 'all'}">전체</button>${Object.keys(PLAT).map(p => `<button data-p="${p}" aria-pressed="${plat === p}">${PLAT[p]}</button>`).join('')}</div>
+      <div class="seg" id="a-plat"><button data-p="all" aria-pressed="${plat === 'all'}">전체</button>${Object.keys(PLAT).filter(p => d.modes[p] !== 'off').map(p => `<button data-p="${p}" aria-pressed="${plat === p}">${PLAT[p]}</button>`).join('')}</div>
       <span class="hint">${from === to ? from : from + ' ~ ' + to}</span>
     </div>
     ${d.errors.length ? `<div class="err">불러오지 못한 매체가 있습니다.<ul>${d.errors.map(e => `<li>${esc(PLAT[e.platform])}: ${esc(e.message)}</li>`).join('')}</ul></div>` : ''}
@@ -49,6 +50,7 @@ export async function render(main, { query }) {
   const reload = patch => { const n = { r: R.id, p: plat, ...patch }; go(`#/ads?r=${n.r}&p=${n.p}`); };
   main.querySelectorAll('#a-range button').forEach(b => b.onclick = () => reload({ r: b.dataset.r }));
   main.querySelectorAll('#a-plat button').forEach(b => b.onclick = () => reload({ p: b.dataset.p }));
+  bindPlatformSwitches(main, () => render(main, { query }));
   const byKey = k => d.campaigns.find(c => c.key === k);
 
   main.querySelectorAll('[data-toggle]').forEach(el => el.onchange = async () => {

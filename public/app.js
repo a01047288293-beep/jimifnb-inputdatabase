@@ -33,6 +33,22 @@ export function shopLink(productNo, label) {
   return `<a href="${esc(state.shop.url)}/product/detail.html?product_no=${encodeURIComponent(productNo)}" target="_blank" rel="noopener">${text}</a>`;
 }
 export const PLAT = { meta: '메타', google: '구글', tiktok: '틱톡' };
+/** 광고 매체별 '분석에 포함' 스위치 (설정에 저장, 모든 광고 화면·홈·AI 참모에 적용) */
+export function platformSwitches(states) {
+  if (!states) return '';
+  return `<div class="plat-switches" role="group" aria-label="분석에 포함할 광고 매체">${Object.entries(states).map(([p, st]) => {
+    const conn = st.connection === 'live' ? '<span class="src live">실제</span>' : st.connection === 'demo' ? '<span class="src">데모</span>' : '<span class="src off">미연결</span>';
+    const tip = st.canInclude ? (st.included ? '분석에 포함 중 · 누르면 제외' : '분석에서 제외됨 · 누르면 포함') : '아직 연결되지 않아 켤 수 없습니다. 설정·연동에서 연결하면 켤 수 있습니다.';
+    return `<label class="plat-sw ${st.included ? 'on' : ''} ${st.canInclude ? '' : 'dis'}" title="${esc(tip)}"><span class="switch sm"><input type="checkbox" data-plat="${esc(p)}" ${st.included ? 'checked' : ''} ${st.canInclude ? '' : 'disabled'} aria-label="${esc(st.label)} 분석 포함"><span></span></span>${esc(st.label)} ${conn}</label>`;
+  }).join('')}</div>`;
+}
+export function bindPlatformSwitches(root, after) {
+  root.querySelectorAll('[data-plat]').forEach(el => el.onchange = async () => {
+    el.disabled = true;
+    try { await api('/api/settings', { method: 'PUT', body: { adPlatforms: { [el.dataset.plat]: el.checked } } }); toast(el.checked ? '분석에 포함했습니다.' : '분석에서 뺐습니다.'); after(); }
+    catch (e) { el.checked = !el.checked; el.disabled = false; toast(e.message, true); }
+  });
+}
 export const platTag = p => `<span class="plat ${esc(p)}">${esc(PLAT[p] || p)}</span>`;
 export function srcTag(mode) {
   return mode === 'live' ? '<span class="src live">실제</span>' : mode === 'demo' ? '<span class="src">데모</span>' : '<span class="src off">미연결</span>';

@@ -300,14 +300,14 @@ route('GET', '/api/ads', async (req, s, url) => {
   const { from, to } = range(url, 92, 7);
   const [ads, settings, products] = await Promise.all([data.allAds(from, to), data.getSettings(), data.listProducts()]);
   const list = A.campaignSummary(ads.campaigns, ads.rows, settings.campaignLinks || {}, products);
-  return json({ from, to, campaigns: list, errors: ads.errors, modes: ads.modes, products: products.map(p => ({ id: p.id, name: p.name, beRoas: calc(p).beRoas })) });
+  return json({ from, to, campaigns: list, errors: ads.errors, modes: ads.modes, platformStates: await data.platformStates(), products: products.map(p => ({ id: p.id, name: p.name, beRoas: calc(p).beRoas })) });
 });
 /** 광고 분석: 개요·캠페인·소재·퍼널·제품 손익 + 코멘트 */
 route('GET', '/api/ads/analysis', async (req, s, url) => {
   const { from, to } = range(url, 92, 14);
   const r = await adAnalysis(from, to);
   const ai = await getJSON(`cache/adai/${from}_${to}`);
-  return json({ ...r, ai: aiConfigured(), aiComment: ai && Date.now() - ai.at < 6 * 3600000 ? ai : null });
+  return json({ ...r, platformStates: await data.platformStates(), ai: aiConfigured(), aiComment: ai && Date.now() - ai.at < 6 * 3600000 ? ai : null });
 });
 route('POST', '/api/ads/ai-comment', async (req, s) => {
   const b = await body(req);

@@ -17,12 +17,34 @@ const MODE_MEM = new Map();
 export async function mode(source) {
   const hit = MODE_MEM.get(source);
   if (hit && Date.now() - hit.at < 20000) return hit.v;
-  let v;
-  if (source === 'cafe24') v = (await C.cafe24Connected()) ? 'live' : demoOn() ? 'demo' : 'off';
-  else v = (await { meta: M.metaConfigured, google: G.googleConfigured, tiktok: T.tiktokConfigured }[source]()) ? 'live' : demoOn() ? 'demo' : 'off';
+  let v = await rawMode(source);
+  // 광고 매체: 분석에서 뺀 매체는 'off'. 쇼핑몰이 실제 연결된 뒤에는 데모 광고 숫자를 섞지 않음
+  if (source !== 'cafe24' && v !== 'off' && !(await platformIncluded(source, v))) v = 'off';
   // 연결된 상태만 기억 (막 연결한 직후 바로 반영되도록 데모·미연결은 매번 확인)
   if (v === 'live') MODE_MEM.set(source, { at: Date.now(), v });
   return v;
+}
+/** 설정과 관계없는 실제 연결 상태 */
+export async function rawMode(source) {
+  if (source === 'cafe24') return (await C.cafe24Connected()) ? 'live' : demoOn() ? 'demo' : 'off';
+  return (await { meta: M.metaConfigured, google: G.googleConfigured, tiktok: T.tiktokConfigured }[source]()) ? 'live' : demoOn() ? 'demo' : 'off';
+}
+async function platformIncluded(p, raw) {
+  const s = await getSettings();
+  if (raw === 'demo' && (await rawMode('cafe24')) === 'live') return false; // 실제 운영 중엔 미연결 매체의 데모 숫자 제외
+  return s.adPlatforms?.[p] !== false;
+}
+/** 광고 매체별 상태: 연결(live/demo/off) + 분석 포함 여부 + 켤 수 있는지 */
+export async function platformStates() {
+  const s = await getSettings();
+  const shopLive = (await rawMode('cafe24')) === 'live';
+  const out = {};
+  for (const p of PLATFORMS) {
+    const raw = await rawMode(p);
+    const canInclude = raw === 'live' || (!shopLive && raw === 'demo');
+    out[p] = { connection: raw, included: canInclude && s.adPlatforms?.[p] !== false, canInclude, label: PLATFORM_LABEL[p] };
+  }
+  return out;
 }
 export function forgetMode(source) { if (source) MODE_MEM.delete(source); else MODE_MEM.clear(); }
 export async function modes() {
@@ -30,20 +52,28 @@ export async function modes() {
   for (const s of ['cafe24', ...PLATFORMS]) out[s] = await mode(s);
   out.cafe24Keys = C.cafe24KeysSet();
   out.googleKeys = G.googleKeysSet();
+  out.platforms = await platformStates();
   return out;
 }
 
 /* ---------- 설정 ---------- */
 export const DEFAULT_SETTINGS = {
   rulesDryRun: true, maxActionsPerDay: 20, minBudget: 10000, maxBudgetChangePct: 50,
-  csWriter: '지미에프앤비', campaignLinks: {}, defaultFeePct: 3.5, shipSlaHours: 48
+  csWriter: '지미에프앤비', campaignLinks: {}, defaultFeePct: 3.5, shipSlaHours: 48,
+  adPlatforms: { meta: true, google: true, tiktok: true }
 };
 export async function getSettings() { return { ...DEFAULT_SETTINGS, ...((await getJSON('settings')) || {}) }; }
 export async function putSettings(patch, who) {
   const cur = await getSettings();
   const next = { ...cur };
-  const allowed = ['rulesDryRun', 'maxActionsPerDay', 'minBudget', 'maxBudgetChangePct', 'csWriter', 'defaultFeePct', 'shipSlaHours'];
+  const allowed = ['rulesDryRun', 'maxActionsPerDay', 'minBudget', 'maxBudgetChangePct', 'csWriter', 'defaultFeePct', 'shipSlaHours', 'adPlatforms'];
   for (const k of allowed) if (k in patch) next[k] = patch[k];
+  if ('adPlatforms' in patch) {
+    const ap = {};
+    for (const p of PLATFORMS) ap[p] = patch.adPlatforms?.[p] === undefined ? cur.adPlatforms?.[p] !== false : Boolean(patch.adPlatforms[p]);
+    next.adPlatforms = ap;
+    forgetMode();
+  }
   next.rulesDryRun = Boolean(next.rulesDryRun);
   for (const k of ['maxActionsPerDay', 'minBudget', 'maxBudgetChangePct', 'defaultFeePct', 'shipSlaHours']) {
     const n = Number(next[k]); if (!Number.isFinite(n) || n < 0) throw new HttpError(400, `설정값이 올바르지 않습니다: ${k}`); next[k] = n;
@@ -51,7 +81,7 @@ export async function putSettings(patch, who) {
   next.maxBudgetChangePct = Math.min(next.maxBudgetChangePct, 100);
   next.csWriter = String(next.csWriter || '').slice(0, 30) || DEFAULT_SETTINGS.csWriter;
   await setJSON('settings', next);
-  if (who) await addLog({ who, kind: '설정', target: '시스템 설정', detail: allowed.filter(k => k in patch && JSON.stringify(cur[k]) !== JSON.stringify(next[k])).map(k => `${k}: ${cur[k]} → ${next[k]}`).join(', ') || '변경 없음' });
+  if (who) await addLog({ who, kind: '설정', target: '시스템 설정', detail: allowed.filter(k => k in patch && JSON.stringify(cur[k]) !== JSON.stringify(next[k])).map(k => k === 'adPlatforms' ? `분석 포함 매체: ${PLATFORMS.filter(p => next.adPlatforms[p]).map(p => PLATFORM_LABEL[p]).join('·') || '없음'}` : `${k}: ${cur[k]} → ${next[k]}`).join(', ') || '변경 없음' });
   return next;
 }
 export async function setCampaignLink(platform, id, productId, who) {

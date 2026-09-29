@@ -297,3 +297,15 @@ test('주문 기록: 지난달은 달 단위 묶음으로 읽음', async () => {
   assert.equal(rows.length, 31); assert.equal(rows.missingDays, 0);
   assert.equal(await data.packOrderMonths(5), '최신');
 });
+
+test('실제 쇼핑몰 연결 중엔 미연결 매체의 데모 숫자를 섞지 않음', async () => {
+  const saved = process.env.TIKTOK_ACCESS_TOKEN;
+  delete process.env.TIKTOK_ACCESS_TOKEN; data.forgetMode();
+  try {
+    assert.equal(await data.rawMode('tiktok'), 'demo');
+    assert.equal(await data.mode('tiktok'), 'off');
+    const st = await data.platformStates();
+    assert.equal(st.tiktok.canInclude, false); assert.equal(st.tiktok.included, false);
+    assert.equal(st.meta.included, true);
+  } finally { process.env.TIKTOK_ACCESS_TOKEN = saved; data.forgetMode(); }
+});

@@ -1,5 +1,5 @@
 // 광고 분석: 개요(일별 추이·매체 비교) · 캠페인 · 소재 · 제품별 손익 · 퍼널, 광고별 코멘트
-import { api, esc, won, nf, pctf, roasf, platTag, srcTag, toast, pageHead, readPeriod, periodBar, bindPeriod, PLAT, go, setBadge } from '../app.js';
+import { api, esc, won, nf, pctf, roasf, platTag, srcTag, toast, pageHead, readPeriod, periodBar, bindPeriod, PLAT, go, setBadge, platformSwitches, bindPlatformSwitches } from '../app.js';
 import { lineChart, columnChart, delta, spark } from '../charts.js';
 import { fmtTime } from './home.js';
 
@@ -25,11 +25,12 @@ export async function render(main, { query }) {
   const anyMode = Object.values(d.modes).find(m => m !== 'off') || 'off';
 
   main.innerHTML = `
-  ${pageHead('광고 분석', `${esc(d.from)} ~ ${esc(d.to)} · 이전 기간 ${esc(d.prevFrom)} ~ ${esc(d.prevTo)} · ${d.platforms.map(p => PLAT[p] + ' ' + srcTag(d.modes[p])).join(' ')}`, '<a class="btn small" href="#/ads">광고 관리 (켜기·예산) →</a>')}
+  ${pageHead('광고 분석', `${esc(d.from)} ~ ${esc(d.to)} · 이전 기간 ${esc(d.prevFrom)} ~ ${esc(d.prevTo)}`, '<a class="btn small" href="#/ads">광고 관리 (켜기·예산) →</a>')}
   <div class="stack">
+    <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><span class="hint">분석에 포함할 매체</span>${platformSwitches(d.platformStates)}</div>
     ${periodBar(st, [7, 14, 30, 90], 92)}
     ${d.errors.length ? `<div class="err">불러오지 못한 데이터가 있습니다.<ul>${d.errors.map(e => `<li>${esc(PLAT[e.platform] || (e.platform === 'cafe24' ? '카페24' : e.platform))}: ${esc(e.message)}</li>`).join('')}</ul></div>` : ''}
-    ${anyMode === 'off' ? '<div class="notice">연결된 광고 매체가 없습니다. <a href="#/settings">설정·연동</a>에서 메타·구글을 연결하세요.</div>' : ''}
+    ${anyMode === 'off' ? '<div class="notice">분석에 포함된 광고 매체가 없습니다. 위 스위치로 매체를 켜거나 <a href="#/settings">설정·연동</a>에서 연결하세요.</div>' : ''}
     <div class="kpis">
       <div class="kpi"><span class="l">광고비</span><span class="v">${won(T.spend)}</span><span class="s">${delta(T.spend, P.spend, { label: '이전 기간', invert: true })}</span></div>
       <div class="kpi"><span class="l">광고 매출 · ROAS</span><span class="v">${roasf(T.roas)}</span><span class="s">${won(T.revenue)} · ${delta(T.roas, P.roas, { label: '이전' })}</span></div>
@@ -48,6 +49,7 @@ export async function render(main, { query }) {
   </div>`;
 
   bindPeriod(main, 'adanalysis', st, `&t=${tab}`);
+  bindPlatformSwitches(main, () => render(main, { query }));
   main.querySelectorAll('#ad-tabs button').forEach(b => b.onclick = () => go(`#/adanalysis?from=${st.from}&to=${st.to}&t=${b.dataset.t}`));
   const ai = main.querySelector('#ai-go');
   if (ai) ai.onclick = async () => {

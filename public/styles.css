@@ -291,3 +291,9 @@ b.neg{color:var(--bad)} b.pos{color:var(--good)}
 .adv-sugs .btn{white-space:normal;text-align:left}
 ol.steps{padding-left:20px;line-height:1.8}
 @media (max-width:640px){.msg{max-width:100%}.adv-log{max-height:calc(100vh - 250px)}}
+.plat-switches{display:flex;flex-wrap:wrap;gap:8px}
+.plat-sw{display:inline-flex;align-items:center;gap:8px;padding:6px 12px 6px 8px;border:1px solid var(--line-2);border-radius:999px;background:var(--panel);font-size:13px;cursor:pointer;color:var(--fg-2)}
+.plat-sw.on{border-color:var(--accent);color:var(--fg)}
+.plat-sw.dis{opacity:.55;cursor:not-allowed}
+.switch.sm{width:30px;height:18px} .switch.sm span::after{width:12px;height:12px}
+.switch.sm input:checked+span::after{transform:translateX(12px)}
