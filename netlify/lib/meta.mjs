@@ -1,5 +1,5 @@
 // 메타(페이스북·인스타그램) 마케팅 API
-import { httpJson, HttpError, num } from './util.mjs';
+import { httpJson, HttpError, num, addDays } from './util.mjs';
 
 function env() {
   const acct = String(process.env.META_AD_ACCOUNT_ID || '').replace(/^act_/, '');
@@ -9,9 +9,37 @@ export function metaConfigured() { const e = env(); return Boolean(e.token && e.
 const base = () => `https://graph.facebook.com/${env().v}`;
 
 async function get(url) { return httpJson(url, { label: '메타' }); }
+// 메타는 한 번에 요청하는 양이 많으면 "Please reduce the amount of data" 로 거절함 → 페이지 크기와 기간을 줄여 다시 요청
+const tooMuch = e => /reduce the amount of data|too much data|error_subcode.?1504/i.test(String(e?.message || ''));
 async function getAll(url) {
   const out = []; let next = url; let guard = 0;
-  while (next && guard++ < 30) { const d = await get(next); out.push(...(d?.data || [])); next = d?.paging?.next || null; }
+  while (next && guard++ < 60) {
+    let d;
+    try { d = await get(next); }
+    catch (e) {
+      const lim = Number(new URL(next).searchParams.get('limit') || 0);
+      if (tooMuch(e) && lim > 25) { const u = new URL(next); u.searchParams.set('limit', String(Math.max(25, Math.floor(lim / 4)))); next = u.toString(); continue; }
+      throw e;
+    }
+    out.push(...(d?.data || [])); next = d?.paging?.next || null;
+  }
+  return out;
+}
+/** 인사이트를 기간 단위로 나눠 받음. 그래도 많다고 하면 기간을 반으로 쪼개 다시 시도 */
+async function insights(params, from, to, chunkDays) {
+  const e = env();
+  const one = async (a, b) => {
+    const q = new URLSearchParams({ ...params, time_range: JSON.stringify({ since: a, until: b }), access_token: e.token });
+    try { return await getAll(`${base()}/act_${e.acct}/insights?${q}`); }
+    catch (err) {
+      if (!tooMuch(err) || a === b) throw err;
+      const days = Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
+      const mid = addDays(a, Math.floor(days / 2));
+      return [...await one(a, mid), ...await one(addDays(mid, 1), b)];
+    }
+  };
+  const out = [];
+  for (let a = from; a <= to; a = addDays(a, chunkDays)) out.push(...await one(a, [addDays(a, chunkDays - 1), to].sort()[0]));
   return out;
 }
 
@@ -51,11 +79,8 @@ export async function metaCampaigns() {
 
 export async function metaRows(from, to) {
   const e = env();
-  const q = new URLSearchParams({
-    level: 'campaign', fields: 'campaign_id,campaign_name,spend,impressions,clicks,actions,action_values',
-    time_range: JSON.stringify({ since: from, until: to }), time_increment: '1', limit: '500', access_token: e.token
-  });
-  const list = await getAll(`${base()}/act_${e.acct}/insights?${q}`);
+  void e;
+  const list = await insights({ level: 'campaign', fields: 'campaign_id,campaign_name,spend,impressions,clicks,actions,action_values', time_increment: '1', limit: '200' }, from, to, 7);
   return list.map(r => ({
     date: r.date_start, platform: 'meta', campaignId: String(r.campaign_id), name: r.campaign_name,
     spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks),
@@ -67,8 +92,9 @@ const AD_FIELDS = 'ad_id,ad_name,adset_name,campaign_id,campaign_name,spend,impr
 /** 광고(소재) 단위 일별 성과 */
 export async function metaAdRows(from, to) {
   const e = env();
-  const q = new URLSearchParams({ level: 'ad', fields: AD_FIELDS, time_range: JSON.stringify({ since: from, until: to }), time_increment: '1', limit: '500', access_token: e.token });
-  const list = await getAll(`${base()}/act_${e.acct}/insights?${q}`);
+  void e;
+  // 지출이 있었던 광고만, 3일씩 나눠서
+  const list = await insights({ level: 'ad', fields: AD_FIELDS, time_increment: '1', limit: '100', filtering: JSON.stringify([{ field: 'spend', operator: 'GREATER_THAN', value: 0 }]) }, from, to, 3);
   return list.map(r => ({
     date: r.date_start, platform: 'meta', adId: String(r.ad_id), name: r.ad_name, group: r.adset_name || '', campaignId: String(r.campaign_id), campaignName: r.campaign_name,
     spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), purchases: pick(r.actions), revenue: pick(r.action_values), ...funnel(r)
@@ -77,15 +103,19 @@ export async function metaAdRows(from, to) {
 /** 기간 전체의 도달·빈도 (날짜별로 더할 수 없는 값이라 따로 받음) */
 export async function metaAdReach(from, to) {
   const e = env();
-  const q = new URLSearchParams({ level: 'ad', fields: 'ad_id,reach,frequency', time_range: JSON.stringify({ since: from, until: to }), limit: '500', access_token: e.token });
-  const list = await getAll(`${base()}/act_${e.acct}/insights?${q}`);
+  const q = new URLSearchParams({ level: 'ad', fields: 'ad_id,reach,frequency', time_range: JSON.stringify({ since: from, until: to }), limit: '100', filtering: JSON.stringify([{ field: 'spend', operator: 'GREATER_THAN', value: 0 }]), access_token: e.token });
+  let list;
+  // 빈도는 참고용이라, 메타가 거절하면 빈 값으로 두고 나머지 분석은 계속
+  try { list = await getAll(`${base()}/act_${e.acct}/insights?${q}`); } catch (err) { if (tooMuch(err)) return {}; throw err; }
   return Object.fromEntries(list.map(r => [String(r.ad_id), { reach: num(r.reach), frequency: num(r.frequency) }]));
 }
 /** 소재 정보: 썸네일·형식·문구 */
 export async function metaAdCreatives() {
   const e = env();
-  const q = new URLSearchParams({ fields: 'id,name,effective_status,creative{thumbnail_url,image_url,object_type,title,body,video_id}', limit: '200', access_token: e.token });
-  const list = await getAll(`${base()}/act_${e.acct}/ads?${q}`);
+  const q = new URLSearchParams({ fields: 'id,name,effective_status,creative{thumbnail_url,image_url,object_type,title,body,video_id}', limit: '50',
+    filtering: JSON.stringify([{ field: 'effective_status', operator: 'IN', value: ['ACTIVE', 'PAUSED', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED', 'WITH_ISSUES'] }]), access_token: e.token });
+  let list;
+  try { list = await getAll(`${base()}/act_${e.acct}/ads?${q}`); } catch (err) { if (tooMuch(err)) return {}; throw err; }
   return Object.fromEntries(list.map(a => [String(a.id), {
     status: a.effective_status === 'ACTIVE' ? 'on' : a.effective_status === 'PAUSED' || a.effective_status === 'CAMPAIGN_PAUSED' || a.effective_status === 'ADSET_PAUSED' ? 'off' : 'other',
     thumb: a.creative?.thumbnail_url || a.creative?.image_url || null,

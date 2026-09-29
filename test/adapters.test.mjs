@@ -265,3 +265,19 @@ test('광고: 캠페인 목록 5분 캐시, 변경 시 즉시 갱신', async () 
   assert.equal(n, 2, '끄기 후엔 새로 받음');
   handlers.shift(); handlers.shift();
 });
+
+test('메타: "데이터를 줄여달라" 오류면 기간·페이지를 쪼개 다시 받음', async () => {
+  const seen = [];
+  handlers.unshift({ match: /act_123\/insights\?.*level=ad/, fn: url => {
+    const q = new URL(url).searchParams; const tr = JSON.parse(q.get('time_range') || '{}');
+    if (q.get('fields') === 'ad_id,reach,frequency') return { status: 500, body: { error: { message: 'Please reduce the amount of data you\'re asking for, then retry your request' } } };
+    seen.push(tr.since + '~' + tr.until);
+    if (tr.since !== tr.until) return { status: 500, body: { error: { message: 'Please reduce the amount of data you\'re asking for, then retry your request' } } };
+    return { data: [{ date_start: tr.since, ad_id: '1', ad_name: 'a', campaign_id: '9', spend: '1000', impressions: '100', clicks: '3', actions: [{ action_type: 'omni_purchase', value: '1' }], action_values: [{ action_type: 'omni_purchase', value: '30000' }] }] };
+  } });
+  const rows = await M.metaAdRows('2026-09-23', '2026-09-29');
+  assert.equal(rows.length, 7, '하루씩 쪼개서 7일 모두 받음');
+  assert.equal(new Set(rows.map(r => r.date)).size, 7);
+  assert.deepEqual(await M.metaAdReach('2026-09-23', '2026-09-29'), {}, '빈도는 거절되면 빈 값');
+  handlers.shift();
+});
