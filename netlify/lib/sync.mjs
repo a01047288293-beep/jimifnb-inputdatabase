@@ -23,7 +23,8 @@ export async function runSync(trigger = 'schedule') {
     });
     await step('주문 수집', async () => `${(await data.ordersForStats(addDays(today, -13), today)).length}건`);
     // 남은 시간 안에서만 과거 기록을 조금씩 채움 (분석용 1년치)
-    if (Date.now() - started < 12000) await step('과거 기록 채우기', () => data.backfillOrders(365, 30));
+    if (Date.now() - started < 12000) await step('과거 기록 채우기', () => data.backfillOrders(365, 45));
+    if (Date.now() - started < 14000) await step('과거 기록 묶기', () => data.packOrderMonths(3));
   }
   // 광고 분석 기본 화면(최근 14일)을 미리 받아둬서 화면을 열 때 매체를 기다리지 않게 함
   await step('광고 성과 수집', async () => {

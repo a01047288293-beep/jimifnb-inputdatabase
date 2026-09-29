@@ -148,21 +148,24 @@ export function normalizeOrder(o) {
 /** 결제일 기준 주문 목록 (카페24는 한 번에 최대 3개월, 페이지당 100건) */
 export async function fetchOrders(from, to, dateType = 'pay_date', status = null) {
   const e = env();
-  const out = [];
-  let chunkFrom = from;
-  while (chunkFrom <= to) {
-    const chunkTo = [addDays(chunkFrom, 88), to].sort()[0];
+  const chunks = [];
+  for (let a = from; a <= to; a = addDays([addDays(a, 88), to].sort()[0], 1)) chunks.push([a, [addDays(a, 88), to].sort()[0]]);
+  // 3개월 단위 구간은 동시에 받고, 구간 안의 페이지는 차례로 (카페24 호출 한도 고려해 최대 4구간씩)
+  const one = async ([a, b]) => {
+    const out = [];
     for (let offset = 0; offset <= 15000; offset += 100) {
-      const query = { shop_no: e.shopNo, start_date: chunkFrom, end_date: chunkTo, date_type: dateType, embed: 'items,receivers,cancellation,return', limit: 100, offset };
+      const query = { shop_no: e.shopNo, start_date: a, end_date: b, date_type: dateType, embed: 'items,receivers,cancellation,return', limit: 100, offset };
       if (status) query.order_status = status;
       const data = await call('orders', { query });
       const list = data?.orders || [];
       for (const o of list) out.push(normalizeOrder(o));
       if (list.length < 100) break;
     }
-    chunkFrom = addDays(chunkTo, 1);
-  }
-  return out;
+    return out;
+  };
+  const res = [];
+  for (let i = 0; i < chunks.length; i += 4) res.push(...(await Promise.all(chunks.slice(i, i + 4).map(one))).flat());
+  return res;
 }
 /** 지금 해당 상태인 주문 전부 (카페24 '오늘의 할 일'처럼 주문일과 무관). 최근 12개월을 3개월씩 나눠 조회 */
 export const ACTIVE_CODES = ['N00', 'N10', 'N20', 'N21', 'N22', 'N30', 'C00', 'C10', 'C34', 'R00', 'R10', 'R12', 'E00', 'E10', 'E12'];

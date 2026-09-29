@@ -61,18 +61,23 @@ route('GET', '/api/home', async () => {
   const days = dateRange(from, today);
   const errors = [];
   const safe = async (label, fn, fb) => { try { return await fn(); } catch (e) { errors.push(`${label}: ${e.message}`); return fb; } };
-  const settings = await data.getSettings();
-  const products = await data.listProducts();
-  const idx = A.productIndex(products);
   // 이번 달 누적과 지난달 같은 날짜까지 비교
   const monthStart = today.slice(0, 8) + '01';
   const dayOfMonth = Number(today.slice(8));
   const pmEndRaw = addDays(monthStart, -1);
   const pmStart = pmEndRaw.slice(0, 8) + '01';
   const pmEnd = [addDays(pmStart, dayOfMonth - 1), pmEndRaw].sort()[0];
-  const orders = await safe('주문', () => data.ordersForStats([from, monthStart].sort()[0], today), []);
-  const prevMonth = await safe('지난달 주문', () => data.ordersForStats(pmStart, pmEnd), []);
-  const ads = await data.allAds(from, today);
+  // 필요한 데이터를 한꺼번에 동시에 받음
+  const [settings, products, orders, prevMonth, ads, active, cs, inv] = await Promise.all([
+    data.getSettings(), data.listProducts(),
+    safe('주문', () => data.ordersForStats([from, monthStart].sort()[0], today), []),
+    safe('지난달 주문', () => data.ordersForStats(pmStart, pmEnd), []),
+    data.allAds(from, today),
+    safe('처리할 주문', () => data.activeOrders(), { orders: [] }),
+    safe('문의', () => data.articles(addDays(today, -29), today), []),
+    safe('재고', () => data.inventory(), [])
+  ]);
+  const idx = A.productIndex(products);
   for (const e of ads.errors) errors.push(`${data.PLATFORM_LABEL[e.platform]}: ${e.message}`);
   const series = A.dailySeries(days, orders, ads.rows, idx);
   // 어제 같은 시각까지의 매출 (오늘은 하루가 끝나지 않았으므로 공정하게 비교)
@@ -81,13 +86,11 @@ route('GET', '/api/home', async () => {
   const yday = addDays(today, -1);
   const ySame = I.summary(orders.filter(o => o.date === yday && (() => { const [, h] = I.kstParts(o); const m = Number(String(o.time).slice(14, 16)) || 0; return h * 60 + m <= nowMin; })()));
   // 카페24 '오늘의 할 일'과 같은 기준: 주문일과 관계없이 지금 그 상태인 주문 수
-  const recent = (await safe('처리할 주문', () => data.activeOrders(), { orders: [] })).orders;
+  const recent = active.orders;
   const statusCounts = countStatus(recent);
   const pendingShip = statusCounts.ready;
   const unpaid = statusCounts.unpaid;
   const delayed = I.fulfillmentInsights(recent, { slaHours: settings.shipSlaHours }).delayed.length;
-  const cs = await safe('문의', () => data.articles(addDays(today, -29), today), []);
-  const inv = await safe('재고', () => data.inventory(), []);
   const week = dateRange(addDays(today, -6), today);
   const weekOrders = orders.filter(o => o.date >= week[0]);
   const pi = I.productInsights(weekOrders, [], inv, week, idx);
@@ -138,10 +141,11 @@ function countStatus(list) {
 /** 카페24 대시보드와 숫자 대조: 같은 기간을 주문일·결제일 두 기준으로 받아 차이 항목별로 나눔 */
 route('GET', '/api/reconcile', async (req, s, url) => {
   const { from, to, today } = range(url, 31, 7);
-  const byOrder = await data.ordersLive(from, to, 'order');
-  const byPay = await data.ordersLive(from, to, 'pay');
-  let refunds = [], refundError = null;
-  try { refunds = await data.refunds(from, to); } catch (e) { refundError = e.message; }
+  let refundError = null;
+  const [byOrder, byPay, refunds] = await Promise.all([
+    data.ordersLive(from, to, 'order'), data.ordersLive(from, to, 'pay'),
+    data.refunds(from, to).catch(e => { refundError = e.message; return []; })
+  ]);
   const days = dateRange(from, [to, today].sort()[0]);
   const isClaim = o => o.canceled || /^[CR]/.test(String(o.status));
   const rows = days.map(d => {
@@ -222,14 +226,13 @@ function periods(from, to) {
 route('GET', '/api/insights/sales', async (req, s, url) => {
   const { from, to } = range(url, 184, 30);
   const P = periods(from, to);
-  const orders = await data.ordersForStats(from, to);
-  const prev = await data.ordersForStats(P.pFrom, P.pTo);
   // 작년 같은 기간은 이미 모아 둔 기록이 있을 때만 (외부 호출 없음)
-  const ly = await data.ordersForStats(P.lyFrom, P.lyTo, { maxFetch: 0 });
-  const lyComplete = (ly.missingDays || 0) === 0 && (await data.mode('cafe24')) !== 'demo';
+  const [orders, prev, ly, products, ads, m] = await Promise.all([
+    data.ordersForStats(from, to), data.ordersForStats(P.pFrom, P.pTo), data.ordersForStats(P.lyFrom, P.lyTo, { maxFetch: 0 }),
+    data.listProducts(), data.allAds(from, to), data.mode('cafe24')
+  ]);
+  const lyComplete = (ly.missingDays || 0) === 0 && m !== 'demo';
   const days = dateRange(from, [to, kstDate()].sort()[0]);
-  const products = await data.listProducts();
-  const ads = await data.allAds(from, to);
   const out = I.salesInsights(orders, prev, lyComplete ? ly : null, days);
   out.prevDaily = I.salesInsights(prev, null, null, dateRange(P.pFrom, P.pTo)).daily;
   out.profit = A.dailySeries(days, orders, ads.rows, A.productIndex(products));
@@ -238,26 +241,29 @@ route('GET', '/api/insights/sales', async (req, s, url) => {
 route('GET', '/api/insights/products', async (req, s, url) => {
   const { from, to } = range(url, 184, 30);
   const P = periods(from, to);
-  const orders = await data.ordersForStats(from, to);
-  const prev = await data.ordersForStats(P.pFrom, P.pTo);
-  let inv = [], invError = null;
-  try { inv = await data.inventory(); } catch (e) { invError = e.message; }
+  let invError = null;
+  const [orders, prev, inv, products] = await Promise.all([
+    data.ordersForStats(from, to), data.ordersForStats(P.pFrom, P.pTo),
+    data.inventory().catch(e => { invError = e.message; return []; }), data.listProducts()
+  ]);
   const days = dateRange(from, [to, kstDate()].sort()[0]);
-  const idx = A.productIndex(await data.listProducts());
+  const idx = A.productIndex(products);
   return json({ from, to, days, ...I.productInsights(orders, prev, inv, days, idx), invError, mode: await data.mode('cafe24') });
 });
 route('GET', '/api/insights/customers', async (req, s, url) => {
   const { from, to, today } = range(url, 184, 90);
+  // 1년 기록은 이미 모아 둔 것만 사용 (외부 호출 없이 빠르게, 비어 있는 날은 자동 수집이 채움)
   const orders = await data.ordersForStats(from, to);
-  const history = await data.ordersForStats(addDays(today, -364), today);
-  return json({ from, to, ...I.customerInsights(orders, history, from), coverage: await data.historyCoverage(365), mode: await data.mode('cafe24') });
+  const [hist, coverage] = await Promise.all([data.ordersForStats(addDays(today, -364), today, { maxFetch: 0 }), data.historyCoverage(365)]);
+  const seen = new Set(hist.map(o => o.id));
+  const history = [...hist, ...orders.filter(o => !seen.has(o.id))];
+  return json({ from, to, ...I.customerInsights(orders, history, from), coverage, mode: await data.mode('cafe24') });
 });
 route('GET', '/api/insights/fulfillment', async (req, s, url) => {
   const { from, to, today } = range(url, 92, 30);
-  const settings = await data.getSettings();
-  const orders = await data.ordersForStats(from, to);
-  // 지연 주문은 현재 상태가 중요해 최근 14일을 실시간으로
-  const live = (await data.activeOrders().catch(() => ({ orders: [] }))).orders;
+  // 지연 주문은 현재 상태가 중요해 '지금 처리할 주문'으로
+  const [settings, orders, act] = await Promise.all([data.getSettings(), data.ordersForStats(from, to), data.activeOrders().catch(() => ({ orders: [] }))]);
+  const live = act.orders;
   const days = dateRange(from, [to, today].sort()[0]);
   const f = I.fulfillmentInsights(orders, { slaHours: settings.shipSlaHours, days });
   f.delayed = I.fulfillmentInsights(live, { slaHours: settings.shipSlaHours }).delayed;
@@ -292,9 +298,7 @@ route('POST', '/api/products/examples', async (req, s) => {
 /* ---------- 광고 ---------- */
 route('GET', '/api/ads', async (req, s, url) => {
   const { from, to } = range(url, 92, 7);
-  const ads = await data.allAds(from, to);
-  const settings = await data.getSettings();
-  const products = await data.listProducts();
+  const [ads, settings, products] = await Promise.all([data.allAds(from, to), data.getSettings(), data.listProducts()]);
   const list = A.campaignSummary(ads.campaigns, ads.rows, settings.campaignLinks || {}, products);
   return json({ from, to, campaigns: list, errors: ads.errors, modes: ads.modes, products: products.map(p => ({ id: p.id, name: p.name, beRoas: calc(p).beRoas })) });
 });
@@ -375,6 +379,7 @@ route('GET', '/api/cafe24/callback', async (req, s, url) => {
   if (!code) return fail('denied', '카페24에서 인증 코드를 받지 못했습니다.');
   try {
     await C.exchangeCode(code, redirectUri);
+    data.forgetMode('cafe24');
     await setJSON('status/cafe24-connect', { at: new Date().toISOString(), ok: true, message: '', redirectUri });
     await data.addLog({ who: '관리자', kind: '연동', target: '카페24', detail: '연결 완료' });
     return back('ok');
@@ -399,6 +404,7 @@ route('GET', '/api/google/callback', async (req, s, url) => {
   if (!code) return fail('denied', '구글에서 인증 코드를 받지 못했습니다.');
   try {
     await G.googleExchange(code, redirectUri);
+    data.forgetMode('google');
     await setJSON('status/google-connect', { at: new Date().toISOString(), ok: true, message: '', redirectUri });
     await data.addLog({ who: '관리자', kind: '연동', target: '구글 Ads', detail: '연결 완료' });
     return back('ok');

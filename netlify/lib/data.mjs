@@ -12,11 +12,19 @@ export const PLATFORM_LABEL = { meta: '메타', google: '구글', tiktok: '틱�
 const demoOn = () => (process.env.DEMO_MODE || 'on').toLowerCase() !== 'off';
 
 /* ---------- 연동 상태 ---------- */
+// 연결 상태는 한 요청 안에서 여러 번 묻기 때문에 20초간 기억
+const MODE_MEM = new Map();
 export async function mode(source) {
-  if (source === 'cafe24') return (await C.cafe24Connected()) ? 'live' : demoOn() ? 'demo' : 'off';
-  const ok = await { meta: M.metaConfigured, google: G.googleConfigured, tiktok: T.tiktokConfigured }[source]();
-  return ok ? 'live' : demoOn() ? 'demo' : 'off';
+  const hit = MODE_MEM.get(source);
+  if (hit && Date.now() - hit.at < 20000) return hit.v;
+  let v;
+  if (source === 'cafe24') v = (await C.cafe24Connected()) ? 'live' : demoOn() ? 'demo' : 'off';
+  else v = (await { meta: M.metaConfigured, google: G.googleConfigured, tiktok: T.tiktokConfigured }[source]()) ? 'live' : demoOn() ? 'demo' : 'off';
+  // 연결된 상태만 기억 (막 연결한 직후 바로 반영되도록 데모·미연결은 매번 확인)
+  if (v === 'live') MODE_MEM.set(source, { at: Date.now(), v });
+  return v;
 }
+export function forgetMode(source) { if (source) MODE_MEM.delete(source); else MODE_MEM.clear(); }
 export async function modes() {
   const out = {};
   for (const s of ['cafe24', ...PLATFORMS]) out[s] = await mode(s);
@@ -82,13 +90,26 @@ function freshEnough(d, hit, today, recentTtl = 10 * 60000) {
 async function inBatches(items, size, fn) {
   for (let i = 0; i < items.length; i += size) await Promise.all(items.slice(i, i + size).map(fn));
 }
+// 같은 서버 인스턴스 안에서는 날짜별 저장본을 메모리에도 들고 있어 저장소 왕복을 줄임
+const DAY_MEM = new Map();
+const MEM_MAX = 4000;
+function memPut(k, v) { if (DAY_MEM.size >= MEM_MAX) DAY_MEM.delete(DAY_MEM.keys().next().value); DAY_MEM.set(k, v); }
+export function _clearMem() { DAY_MEM.clear(); MODE_MEM.clear(); }
 /** maxFetch: 한 번에 외부에서 새로 받을 최대 일수 (나머지는 missing 으로 알려줌) */
 async function cachedDaily(prefix, from, to, fetchRange, { maxFetch = 400, recentTtl } = {}) {
   const today = kstDate();
   const days = dateRange(from, [to, today].sort()[0]);
   const result = {};
   const hits = {};
-  await inBatches(days, 20, async d => { hits[d] = await getJSON(`${prefix}/${d}`); });
+  const need = [];
+  for (const d of days) { const m = DAY_MEM.get(`${prefix}/${d}`); if (m && freshEnough(d, m, today, recentTtl)) hits[d] = m; else need.push(d); }
+  // 보름 넘게 지난 날짜는 달 단위 묶음(1번 읽기)으로 먼저 찾음
+  const old = need.filter(d => d < addDays(today, -15));
+  const months = [...new Set(old.map(d => d.slice(0, 7)))];
+  const packs = {};
+  await Promise.all(months.map(async ym => { packs[ym] = DAY_MEM.get(`${prefix}-m/${ym}`) || await getJSON(`${prefix}-m/${ym}`); if (packs[ym]) memPut(`${prefix}-m/${ym}`, packs[ym]); }));
+  const rest = need.filter(d => { const pk = packs[d.slice(0, 7)]; if (pk && pk.days[d]) { hits[d] = { at: pk.at, rows: pk.days[d] }; return false; } return true; });
+  await inBatches(rest, 50, async d => { const h = await getJSON(`${prefix}/${d}`); hits[d] = h; if (h) memPut(`${prefix}/${d}`, h); });
   const stale = [];
   for (const d of days) {
     if (freshEnough(d, hits[d], today, recentTtl)) result[d] = hits[d].rows;
@@ -104,13 +125,36 @@ async function cachedDaily(prefix, from, to, fetchRange, { maxFetch = 400, recen
     for (const d of dateRange(a, b)) byDay[d] = [];
     for (const r of rows) if (byDay[r.date]) byDay[r.date].push(r);
     const write = Object.keys(byDay).filter(d => toFetch.includes(d) || !result[d]);
-    await inBatches(write, 10, async d => { result[d] = byDay[d]; await setJSON(`${prefix}/${d}`, { at: Date.now(), rows: byDay[d] }); });
+    await inBatches(write, 20, async d => { result[d] = byDay[d]; const v = { at: Date.now(), rows: byDay[d] }; memPut(`${prefix}/${d}`, v); await setJSON(`${prefix}/${d}`, v); });
   }
   // 받지 못한 날짜는 예전 저장본이라도 사용
   for (const d of skipped) if (hits[d]) result[d] = hits[d].rows;
   const rows = days.flatMap(d => result[d] || []);
   rows.missingDays = skipped.filter(d => !hits[d]).length;
   return rows;
+}
+
+/** 다 모인 지난달들을 달 단위 묶음으로 저장 (1년치 조회를 365번 → 12번 읽기로) */
+async function packMonths(prefix, limit = 3) {
+  const today = kstDate();
+  const cutoff = addDays(today, -16);
+  const keys = new Set((await listKeys(prefix + '/')).map(k => k.slice(prefix.length + 1)));
+  const packed = new Set((await listKeys(prefix + '-m/')).map(k => k.slice(prefix.length + 3)));
+  const months = [...new Set([...keys].map(d => d.slice(0, 7)))].filter(ym => !packed.has(ym)).sort().reverse();
+  let made = 0;
+  for (const ym of months) {
+    if (made >= limit) break;
+    const first = ym + '-01';
+    const last = addDays(addDays(first, 32).slice(0, 8) + '01', -1);
+    if (last > cutoff) continue; // 아직 바뀔 수 있는 달
+    const days = dateRange(first, last);
+    if (!days.every(d => keys.has(d))) continue; // 빈 날이 있으면 나중에
+    const vals = {};
+    await inBatches(days, 31, async d => { vals[d] = (await getJSON(`${prefix}/${d}`))?.rows || []; });
+    await setJSON(`${prefix}-m/${ym}`, { at: Date.now(), days: vals });
+    made++;
+  }
+  return made;
 }
 
 /* ---------- 주문 ---------- */
@@ -133,6 +177,11 @@ export async function backfillOrders(days = 365, perRun = 45) {
   const chunk = missing.slice(0, perRun);
   await cachedDaily(ORDER_CACHE, chunk[0], chunk[chunk.length - 1], C.fetchOrders, { maxFetch: perRun + 31 });
   return `기록 채우는 중: ${all.length - missing.length + chunk.length}/${all.length}일`;
+}
+export async function packOrderMonths(limit = 3) {
+  if ((await mode('cafe24')) !== 'live') return '해당 없음';
+  const n = await packMonths(ORDER_CACHE, limit);
+  return n ? `${n}개월 묶음` : '최신';
 }
 export async function historyCoverage(days = 365) {
   if ((await mode('cafe24')) !== 'live') return { have: days, total: days };

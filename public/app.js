@@ -38,7 +38,21 @@ export function srcTag(mode) {
   return mode === 'live' ? '<span class="src live">실제</span>' : mode === 'demo' ? '<span class="src">데모</span>' : '<span class="src off">미연결</span>';
 }
 
-export async function api(path, { method = 'GET', body } = {}) {
+// 같은 화면을 1분 안에 다시 열면 받아둔 결과를 바로 보여줌 (저장·변경 요청이 있으면 모두 비움)
+const GET_CACHE = new Map();
+const NO_CACHE = /^\/api\/(advisor|me|status|orders\/active\?fresh|log)/;
+export function clearApiCache() { GET_CACHE.clear(); }
+export async function api(path, { method = 'GET', body, fresh = false } = {}) {
+  if (method === 'GET' && !fresh && !NO_CACHE.test(path)) {
+    const hit = GET_CACHE.get(path);
+    if (hit && Date.now() - hit.at < 60000) return structuredClone(hit.data);
+  }
+  if (method !== 'GET') GET_CACHE.clear();
+  const data = await apiRaw(path, method, body);
+  if (method === 'GET' && !NO_CACHE.test(path)) { if (GET_CACHE.size > 60) GET_CACHE.delete(GET_CACHE.keys().next().value); GET_CACHE.set(path, { at: Date.now(), data: structuredClone(data) }); }
+  return data;
+}
+async function apiRaw(path, method, body) {
   const opt = { method, headers: { 'x-jimi': '1' }, credentials: 'same-origin' };
   if (body !== undefined) { opt.headers['content-type'] = 'application/json'; opt.body = JSON.stringify(body); }
   let res;

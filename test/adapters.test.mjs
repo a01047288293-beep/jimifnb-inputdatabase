@@ -281,3 +281,19 @@ test('메타: "데이터를 줄여달라" 오류면 기간·페이지를 쪼개 
   assert.deepEqual(await M.metaAdReach('2026-09-23', '2026-09-29'), {}, '빈도는 거절되면 빈 값');
   handlers.shift();
 });
+
+test('주문 기록: 지난달은 달 단위 묶음으로 읽음', async () => {
+  const { setJSON, getJSON } = await import('../netlify/lib/store.mjs');
+  const { dateRange } = await import('../netlify/lib/util.mjs');
+  const days = dateRange('2026-05-01', '2026-05-31');
+  for (const d of days) await setJSON(`cache/orders3/${d}`, { at: Date.now(), rows: [{ id: 'o' + d, date: d, amount: 1000, paid: true, status: 'N40', items: [] }] });
+  assert.equal(await data.packOrderMonths(5), '1개월 묶음');
+  const pack = await getJSON('cache/orders3-m/2026-05');
+  assert.equal(Object.keys(pack.days).length, 31);
+  // 하루짜리 저장본을 지워도 묶음에서 읽힘
+  await setJSON('cache/orders3/2026-05-10', null);
+  data._clearMem();
+  const rows = await data.ordersForStats('2026-05-01', '2026-05-31', { maxFetch: 0 });
+  assert.equal(rows.length, 31); assert.equal(rows.missingDays, 0);
+  assert.equal(await data.packOrderMonths(5), '최신');
+});
