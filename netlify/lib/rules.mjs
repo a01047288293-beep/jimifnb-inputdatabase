@@ -25,14 +25,14 @@ export function validateRule(r) {
   if (!r || typeof r !== 'object') throw new HttpError(400, '규칙 형식이 올바르지 않습니다.');
   if (!String(r.name || '').trim()) errs.push('규칙 이름을 입력하세요.');
   if (!['all', ...data.PLATFORMS].includes(r.platform)) errs.push('매체를 선택하세요.');
-  if (!(r.window in WINDOWS)) errs.push('기간을 선택하세요.');
+  if (!Object.hasOwn(WINDOWS, r.window)) errs.push('기간을 선택하세요.');
   if (!Array.isArray(r.conditions) || !r.conditions.length) errs.push('조건을 1개 이상 넣으세요.');
   for (const c of r.conditions || []) {
-    if (!(c.metric in METRICS)) errs.push('알 수 없는 지표가 있습니다.');
+    if (!Object.hasOwn(METRICS, c.metric)) errs.push('알 수 없는 지표가 있습니다.');
     if (!OPS.includes(c.op)) errs.push('알 수 없는 비교 방식이 있습니다.');
     if (!Number.isFinite(Number(c.value))) errs.push('조건 값은 숫자여야 합니다.');
   }
-  if (!r.action || !(r.action.type in ACTIONS)) errs.push('실행할 동작을 선택하세요.');
+  if (!r.action || !Object.hasOwn(ACTIONS, r.action.type)) errs.push('실행할 동작을 선택하세요.');
   if (r.action && ['budget_down', 'budget_up'].includes(r.action.type) && !(num(r.action.pct) > 0 && num(r.action.pct) <= 100)) errs.push('예산 변경 비율은 1~100% 사이로 입력하세요.');
   if (errs.length) throw new HttpError(400, errs.join(' '));
   return {
@@ -89,8 +89,9 @@ export function newBudget(cur, action, settings) {
 
 /* ---------- 저장 ---------- */
 export async function listRules() {
-  const out = [];
-  for (const k of await listKeys('rules/')) { const r = await getJSON(k); if (r) out.push({ ...r, id: k.slice(6) }); }
+  const keys = await listKeys('rules/');
+  const got = await Promise.all(keys.map(k => getJSON(k)));
+  const out = keys.map((k, i) => got[i] && { ...got[i], id: k.slice(6) }).filter(Boolean);
   return out.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
 }
 export async function saveRule(id, body, who) {
@@ -134,52 +135,58 @@ export async function runRules({ who = '자동 규칙', dryRunOverride = null } 
   const dryRun = dryRunOverride == null ? settings.rulesDryRun : dryRunOverride;
   const rules = (await listRules()).filter(r => r.enabled);
   const today = kstDate();
-  const countKey = 'rulecount/' + today;
-  const counter = (await getJSON(countKey)) || { n: 0 };
-  const stateKey = 'rulestate';
-  const state = (await getJSON(stateKey)) || {};
-  const cache = {};
-  const report = { dryRun, ran: 0, actions: [], errors: [] };
-  const actedThisRun = new Set();
-  for (const rule of rules) {
-    let sums;
-    try { sums = await summariesFor(rule.window, cache); } catch (e) { report.errors.push(`${rule.name}: ${e.message}`); continue; }
-    for (const err of sums.errors) report.errors.push(`${data.PLATFORM_LABEL[err.platform]}: ${err.message}`);
-    report.ran++;
-    for (const m of matchRule(rule, sums.list)) {
-      if (m.skipped) continue;
-      const c = m.campaign;
-      if (actedThisRun.has(c.key)) continue;
-      const sk = (dryRun ? 'dry|' : '') + rule.id + '|' + c.key;
-      if (state[sk] && Date.now() - state[sk] < rule.cooldownHours * 3600000) continue;
-      if (!dryRun && counter.n >= settings.maxActionsPerDay) { report.errors.push(`하루 최대 실행 횟수(${settings.maxActionsPerDay}회)에 도달해 나머지는 건너뜀`); break; }
-      const act = { rule: rule.name, platform: c.platform, campaign: c.name, action: ACTIONS[rule.action.type], reason: m.reason, done: false };
-      try {
-        if (!dryRun) {
-          if (rule.action.type === 'pause') await data.setCampaignStatus(c.platform, c.id, false, who, `[${rule.name}] ${m.reason}`);
-          else if (rule.action.type === 'enable') await data.setCampaignStatus(c.platform, c.id, true, who, `[${rule.name}] ${m.reason}`);
-          else if (rule.action.type === 'budget_down' || rule.action.type === 'budget_up') {
-            if (c.dailyBudget == null) throw new HttpError(400, '캠페인 예산이 없어 건너뜀');
-            const nb = newBudget(c.dailyBudget, rule.action, settings);
-            if (nb === c.dailyBudget) throw new HttpError(400, '최소 예산에 도달해 변경 없음');
-            await data.setCampaignBudget(c.platform, c.id, nb, who, `[${rule.name}] ${m.reason}`);
-            act.action += ` (${c.dailyBudget.toLocaleString('ko-KR')}원 → ${nb.toLocaleString('ko-KR')}원)`;
-          } else await data.addLog({ who, kind: '규칙 알림', target: `${data.PLATFORM_LABEL[c.platform]} ${c.name}`, detail: `[${rule.name}] ${m.reason}` });
-          counter.n += 1;
-          state[sk] = Date.now();
-          act.done = true;
-        } else {
-          await data.addLog({ who, kind: '모의 실행', target: `${data.PLATFORM_LABEL[c.platform]} ${c.name}`, detail: `[${rule.name}] ${ACTIONS[rule.action.type]} 조건 충족: ${m.reason}` });
-          state[sk] = Date.now();
-        }
-      } catch (e) { act.error = e.message; report.errors.push(`${c.name}: ${e.message}`); }
-      actedThisRun.add(c.key);
-      report.actions.push(act);
+  // 자동 수집과 '지금 실행'이 겹치면 대기 시간 기록이 서로 덮여 같은 캠페인에 두 번 적용될 수 있어, 60초 안에 다른 실행이 시작됐으면 건너뜀
+  const lock = await getJSON('rulelock');
+  if (lock && Date.now() - lock.at < 60000 && lock.id) return { ran: 0, actions: [], errors: ['다른 규칙 실행이 진행 중이라 이번은 건너뜀 (1분 뒤 다시 시도)'], dryRun: (await data.getSettings()).rulesDryRun, skipped: true };
+  const lockId = Math.random().toString(36).slice(2);
+  await setJSON('rulelock', { at: Date.now(), id: lockId });
+  try {
+    const countKey = 'rulecount/' + today;
+    const counter = (await getJSON(countKey)) || { n: 0 };
+    const stateKey = 'rulestate';
+    const state = (await getJSON(stateKey)) || {};
+    const cache = {};
+    const report = { dryRun, ran: 0, actions: [], errors: [] };
+    const actedThisRun = new Set();
+    for (const rule of rules) {
+      let sums;
+      try { sums = await summariesFor(rule.window, cache); } catch (e) { report.errors.push(`${rule.name}: ${e.message}`); continue; }
+      for (const err of sums.errors) report.errors.push(`${data.PLATFORM_LABEL[err.platform]}: ${err.message}`);
+      report.ran++;
+      for (const m of matchRule(rule, sums.list)) {
+        if (m.skipped) continue;
+        const c = m.campaign;
+        if (actedThisRun.has(c.key)) continue;
+        const sk = (dryRun ? 'dry|' : '') + rule.id + '|' + c.key;
+        if (state[sk] && Date.now() - state[sk] < rule.cooldownHours * 3600000) continue;
+        if (!dryRun && counter.n >= settings.maxActionsPerDay) { report.errors.push(`하루 최대 실행 횟수(${settings.maxActionsPerDay}회)에 도달해 나머지는 건너뜀`); break; }
+        const act = { rule: rule.name, platform: c.platform, campaign: c.name, action: ACTIONS[rule.action.type], reason: m.reason, done: false };
+        try {
+          if (!dryRun) {
+            if (rule.action.type === 'pause') await data.setCampaignStatus(c.platform, c.id, false, who, `[${rule.name}] ${m.reason}`);
+            else if (rule.action.type === 'enable') await data.setCampaignStatus(c.platform, c.id, true, who, `[${rule.name}] ${m.reason}`);
+            else if (rule.action.type === 'budget_down' || rule.action.type === 'budget_up') {
+              // 바꿀 수 없는 경우는 오류가 아니라 '건너뜀'으로 기록하고, 대기 시간을 적용해 매번 반복하지 않음
+              const nb = c.dailyBudget == null ? null : newBudget(c.dailyBudget, rule.action, settings);
+              if (nb == null || nb === c.dailyBudget) { act.skipped = c.dailyBudget == null ? '캠페인 예산이 없어 건너뜀' : '최소·최대 예산에 도달해 변경 없음'; state[sk] = Date.now(); actedThisRun.add(c.key); report.actions.push(act); continue; }
+              await data.setCampaignBudget(c.platform, c.id, nb, who, `[${rule.name}] ${m.reason}`);
+              act.action += ` (${c.dailyBudget.toLocaleString('ko-KR')}원 → ${nb.toLocaleString('ko-KR')}원)`;
+            } else await data.addLog({ who, kind: '규칙 알림', target: `${data.PLATFORM_LABEL[c.platform]} ${c.name}`, detail: `[${rule.name}] ${m.reason}` });
+            counter.n += 1;
+            state[sk] = Date.now();
+            act.done = true;
+          } else {
+            await data.addLog({ who, kind: '모의 실행', target: `${data.PLATFORM_LABEL[c.platform]} ${c.name}`, detail: `[${rule.name}] ${ACTIONS[rule.action.type]} 조건 충족: ${m.reason}` });
+            state[sk] = Date.now();
+          }
+        } catch (e) { act.error = e.message; report.errors.push(`${c.name}: ${e.message}`); }
+        actedThisRun.add(c.key);
+        report.actions.push(act);
+      }
+      const stored = await getJSON('rules/' + rule.id);
+      if (stored) await setJSON('rules/' + rule.id, { ...stored, lastRun: new Date().toISOString() });
     }
-    const stored = await getJSON('rules/' + rule.id);
-    if (stored) await setJSON('rules/' + rule.id, { ...stored, lastRun: new Date().toISOString() });
-  }
-  await setJSON(countKey, counter);
-  await setJSON(stateKey, state);
-  return report;
+    await Promise.all([setJSON(countKey, counter), setJSON(stateKey, state)]);
+    return report;
+  } finally { const l = await getJSON('rulelock'); if (l && l.id === lockId) await setJSON('rulelock', { at: 0 }); }
 }

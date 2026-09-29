@@ -54,7 +54,7 @@ export async function render(main) {
       const r = await api('/api/rules/run', { method: 'POST' });
       modal(`<h2>${r.dryRun ? '모의 실행 결과' : '실행 결과'}</h2>
         <p style="margin:0">규칙 ${r.ran}개 확인, 조건에 걸린 캠페인 ${r.actions.length}개${r.dryRun ? ' (기록만 남김)' : ''}</p>
-        ${r.actions.length ? `<div class="tbl-wrap"><table><thead><tr><th>규칙</th><th>캠페인</th><th>동작</th><th>사유</th></tr></thead><tbody>${r.actions.map(a => `<tr><td>${esc(a.rule)}</td><td>${platTag(a.platform)} ${esc(a.campaign)}</td><td>${esc(a.action)}${a.error ? `<div style="color:var(--bad)">${esc(a.error)}</div>` : ''}</td><td class="hint">${esc(a.reason)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+        ${r.actions.length ? `<div class="tbl-wrap"><table><thead><tr><th>규칙</th><th>캠페인</th><th>동작</th><th>사유</th></tr></thead><tbody>${r.actions.map(a => `<tr><td>${esc(a.rule)}</td><td>${platTag(a.platform)} ${esc(a.campaign)}</td><td>${esc(a.action)}${a.error ? `<div style="color:var(--bad)">${esc(a.error)}</div>` : a.skipped ? `<div class="hint">${esc(a.skipped)}</div>` : ''}</td><td class="hint">${esc(a.reason)}</td></tr>`).join('')}</tbody></table></div>` : ''}
         ${r.errors.length ? `<div class="err"><ul>${r.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : ''}
         <div class="hint">같은 캠페인에는 규칙의 대기 시간이 지나야 다시 실행됩니다.</div>
         <div class="foot"><button class="btn primary" data-close>닫기</button></div>`);

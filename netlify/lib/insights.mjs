@@ -106,15 +106,21 @@ export function productInsights(orders, prevOrders, inventory, days, costIdx) {
   });
   // 재고: 최근 14일(기간 끝 기준) 하루 평균 판매로 며칠 버티는지
   const recentDays = new Set(days.slice(-14));
+  // 주문의 옵션 표기("맛=매운맛, 중량=500g")와 재고의 옵션 표기("매운맛 / 500g")가 달라서 같은 모양으로 맞춘 뒤 비교. 품목코드가 있으면 그것을 우선
+  const normOpt = s => String(s || '').split(/[,/|]/).map(x => x.replace(/^[^=]*=/, '').trim()).filter(Boolean).join('/');
   const sold = new Map();
   for (const o of orders.filter(valid)) if (recentDays.has(o.date)) for (const it of o.items) {
-    const k = it.productNo + '|' + (it.option || '');
-    sold.set(k, (sold.get(k) || 0) + num(it.qty));
-    sold.set(it.productNo + '|*', (sold.get(it.productNo + '|*') || 0) + num(it.qty));
+    const q = num(it.qty);
+    if (it.variant) sold.set('v|' + it.variant, (sold.get('v|' + it.variant) || 0) + q);
+    const k = it.productNo + '|' + normOpt(it.option);
+    sold.set(k, (sold.get(k) || 0) + q);
+    sold.set(it.productNo + '|*', (sold.get(it.productNo + '|*') || 0) + q);
   }
   const span = Math.max(1, recentDays.size);
   const stock = (inventory || []).map(v => {
-    const perDay = (sold.get(v.productNo + '|' + (v.option || '')) ?? (v.option ? 0 : sold.get(v.productNo + '|*') || 0)) / span;
+    const byVariant = v.variant ? sold.get('v|' + v.variant) : undefined;
+    const byOption = sold.get(v.productNo + '|' + normOpt(v.option));
+    const perDay = (byVariant ?? byOption ?? (v.option ? 0 : sold.get(v.productNo + '|*') || 0)) / span;
     const cover = v.quantity != null && perDay > 0 ? v.quantity / perDay : null;
     const soldAny = (sold.get(v.productNo + '|*') || 0) > 0;
     let level = 'ok', note = '';

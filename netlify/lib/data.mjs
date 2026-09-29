@@ -13,15 +13,14 @@ const demoOn = () => (process.env.DEMO_MODE || 'on').toLowerCase() !== 'off';
 
 /* ---------- 연동 상태 ---------- */
 // 연결 상태는 한 요청 안에서 여러 번 묻기 때문에 20초간 기억
+// 연결 상태: 연결된(live)은 20초, 데모·미연결은 3초만 기억 (연결 직후 바로 반영되게)
 const MODE_MEM = new Map();
 export async function mode(source) {
   const hit = MODE_MEM.get(source);
-  if (hit && Date.now() - hit.at < 20000) return hit.v;
-  let v = await rawMode(source);
-  // 광고 매체: 분석에서 뺀 매체는 'off'. 쇼핑몰이 실제 연결된 뒤에는 데모 광고 숫자를 섞지 않음
-  if (source !== 'cafe24' && v !== 'off' && !(await platformIncluded(source, v))) v = 'off';
-  // 연결된 상태만 기억 (막 연결한 직후 바로 반영되도록 데모·미연결은 매번 확인)
-  if (v === 'live') MODE_MEM.set(source, { at: Date.now(), v });
+  if (hit && Date.now() - hit.at < (hit.v === 'live' ? 20000 : 3000)) return hit.v;
+  const st = await platformStates();
+  const v = source === 'cafe24' ? st.cafe24 : st[source]?.included ? st[source].connection : 'off';
+  MODE_MEM.set(source, { at: Date.now(), v });
   return v;
 }
 /** 설정과 관계없는 실제 연결 상태 */
@@ -29,27 +28,30 @@ export async function rawMode(source) {
   if (source === 'cafe24') return (await C.cafe24Connected()) ? 'live' : demoOn() ? 'demo' : 'off';
   return (await { meta: M.metaConfigured, google: G.googleConfigured, tiktok: T.tiktokConfigured }[source]()) ? 'live' : demoOn() ? 'demo' : 'off';
 }
-async function platformIncluded(p, raw) {
-  const s = await getSettings();
-  if (raw === 'demo' && (await rawMode('cafe24')) === 'live') return false; // 실제 운영 중엔 미연결 매체의 데모 숫자 제외
-  return s.adPlatforms?.[p] !== false;
-}
-/** 광고 매체별 상태: 연결(live/demo/off) + 분석 포함 여부 + 켤 수 있는지 */
+/** 광고 매체별 상태: 연결(live/demo/off) + 분석 포함 여부 + 켤 수 있는지. 한 번에 동시에 확인하고 3초 기억 */
+let statesMem = null;
 export async function platformStates() {
-  const s = await getSettings();
-  const shopLive = (await rawMode('cafe24')) === 'live';
+  if (statesMem && Date.now() - statesMem.at < 3000) return statesMem.v;
+  const [s, shop, ...raws] = await Promise.all([getSettings(), rawMode('cafe24'), ...PLATFORMS.map(p => rawMode(p))]);
+  const shopLive = shop === 'live';
   const out = {};
-  for (const p of PLATFORMS) {
-    const raw = await rawMode(p);
+  PLATFORMS.forEach((p, i) => {
+    const raw = raws[i];
     const canInclude = raw === 'live' || (!shopLive && raw === 'demo');
-    out[p] = { connection: raw, included: canInclude && s.adPlatforms?.[p] !== false, canInclude, label: PLATFORM_LABEL[p] };
-  }
+    const included = canInclude && s.adPlatforms?.[p] !== false;
+    out[p] = { connection: raw, included, canInclude, label: PLATFORM_LABEL[p] };
+  });
+  Object.defineProperty(out, 'cafe24', { value: shop, enumerable: false });
+  Object.defineProperty(out, 'shopLive', { value: shopLive, enumerable: false });
+  statesMem = { at: Date.now(), v: out };
   return out;
 }
-export function forgetMode(source) { if (source) MODE_MEM.delete(source); else MODE_MEM.clear(); }
+C.onTokenSaved(() => forgetMode());
+export function forgetMode(source) { if (source) MODE_MEM.delete(source); else MODE_MEM.clear(); statesMem = null; settingsMem = null; }
 export async function modes() {
-  const out = {};
-  for (const s of ['cafe24', ...PLATFORMS]) out[s] = await mode(s);
+  const [c, ...ms] = await Promise.all(['cafe24', ...PLATFORMS].map(s => mode(s)));
+  const out = { cafe24: c };
+  PLATFORMS.forEach((p, i) => { out[p] = ms[i]; });
   out.cafe24Keys = C.cafe24KeysSet();
   out.googleKeys = G.googleKeysSet();
   out.platforms = await platformStates();
@@ -62,9 +64,16 @@ export const DEFAULT_SETTINGS = {
   csWriter: '지미에프앤비', campaignLinks: {}, defaultFeePct: 3.5, shipSlaHours: 48,
   adPlatforms: { meta: true, google: true, tiktok: true }
 };
-export async function getSettings() { return { ...DEFAULT_SETTINGS, ...((await getJSON('settings')) || {}) }; }
+// 설정은 요청마다 여러 번 읽히므로 같은 서버 안에서 5초 기억 (저장 시 바로 갱신)
+let settingsMem = null;
+export async function getSettings({ fresh = false } = {}) {
+  if (!fresh && settingsMem && Date.now() - settingsMem.at < 2000) return { ...settingsMem.v };
+  const v = { ...DEFAULT_SETTINGS, ...((await getJSON('settings')) || {}) };
+  settingsMem = { at: Date.now(), v };
+  return { ...v };
+}
 export async function putSettings(patch, who) {
-  const cur = await getSettings();
+  const cur = await getSettings({ fresh: true });
   const next = { ...cur };
   const allowed = ['rulesDryRun', 'maxActionsPerDay', 'minBudget', 'maxBudgetChangePct', 'csWriter', 'defaultFeePct', 'shipSlaHours', 'adPlatforms'];
   for (const k of allowed) if (k in patch) next[k] = patch[k];
@@ -81,14 +90,16 @@ export async function putSettings(patch, who) {
   next.maxBudgetChangePct = Math.min(next.maxBudgetChangePct, 100);
   next.csWriter = String(next.csWriter || '').slice(0, 30) || DEFAULT_SETTINGS.csWriter;
   await setJSON('settings', next);
+  settingsMem = { at: Date.now(), v: next }; statesMem = null; MODE_MEM.clear();
   if (who) await addLog({ who, kind: '설정', target: '시스템 설정', detail: allowed.filter(k => k in patch && JSON.stringify(cur[k]) !== JSON.stringify(next[k])).map(k => k === 'adPlatforms' ? `분석 포함 매체: ${PLATFORMS.filter(p => next.adPlatforms[p]).map(p => PLATFORM_LABEL[p]).join('·') || '없음'}` : `${k}: ${cur[k]} → ${next[k]}`).join(', ') || '변경 없음' });
   return next;
 }
 export async function setCampaignLink(platform, id, productId, who) {
-  const s = await getSettings();
+  const s = await getSettings({ fresh: true });
   const links = { ...(s.campaignLinks || {}) };
   if (productId) links[`${platform}:${id}`] = productId; else delete links[`${platform}:${id}`];
   await setJSON('settings', { ...s, campaignLinks: links });
+  settingsMem = { at: Date.now(), v: { ...s, campaignLinks: links } };
   if (who) await addLog({ who, kind: '광고 연결', target: `${PLATFORM_LABEL[platform]} ${id}`, detail: productId ? `제품 ${productId} 연결` : '연결 해제' });
   return links;
 }
@@ -100,13 +111,17 @@ export async function addLog(entry) {
   const list = (await getJSON(key)) || [];
   list.push({ at, ...entry });
   if (list.length > 5000) list.splice(0, list.length - 5000);
-  await setJSON(key, list);
+  const prevRecent = (await getJSON('log/recent')) || [];
+  const recent = [...prevRecent, { at, ...entry }].slice(-30);
+  await Promise.all([setJSON(key, list), setJSON('log/recent', recent)]);
 }
 export async function listLogs(limit = 200) {
-  const keys = (await listKeys('log/')).sort().reverse().slice(0, 3);
-  const out = [];
-  for (const k of keys) { const l = (await getJSON(k)) || []; out.push(...l); }
-  return out.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, limit);
+  // 홈처럼 몇 건만 필요할 때는 최근 묶음 하나만 읽음
+  const cur = 'log/' + kstDate().slice(0, 7);
+  if (limit <= 20) { const l = (await getJSON('log/recent')) || (await getJSON(cur)) || []; return [...l].sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, limit); }
+  const keys = (await listKeys('log/')).filter(k => k !== 'log/recent').sort().reverse().slice(0, 3);
+  const lists = await Promise.all(keys.map(k => getJSON(k)));
+  return lists.flatMap(l => l || []).sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, limit);
 }
 
 /* ---------- 캐시: 날짜별 저장. 최근 2일은 10분, 최근 14일은 6시간마다 새로 받고(상태·반품 변화 반영), 그 이전은 저장본 사용 ---------- */
@@ -124,9 +139,9 @@ async function inBatches(items, size, fn) {
 }
 // 같은 서버 인스턴스 안에서는 날짜별 저장본을 메모리에도 들고 있어 저장소 왕복을 줄임
 const DAY_MEM = new Map();
-const MEM_MAX = 4000;
+const MEM_MAX = 1200;
 function memPut(k, v) { if (DAY_MEM.size >= MEM_MAX) DAY_MEM.delete(DAY_MEM.keys().next().value); DAY_MEM.set(k, v); }
-export function _clearMem() { DAY_MEM.clear(); MODE_MEM.clear(); }
+export function _clearMem() { DAY_MEM.clear(); MODE_MEM.clear(); statesMem = null; settingsMem = null; }
 /** maxFetch: 한 번에 외부에서 새로 받을 최대 일수 (나머지는 missing 으로 알려줌) */
 async function cachedDaily(prefix, from, to, fetchRange, { maxFetch = 400, recentTtl } = {}) {
   const today = kstDate();
@@ -405,13 +420,19 @@ export async function setCampaignBudget(platform, id, won, who, why) {
 }
 
 /* ---------- 제품(마진) ---------- */
+// 제품 목록은 거의 모든 화면이 읽으므로 같은 서버 안에서 15초 기억 (저장·삭제 시 바로 지움)
+let productsMem = null;
 export async function listProducts() {
+  if (productsMem && Date.now() - productsMem.at < 2000) return productsMem.list.map(p => ({ ...p }));
   const keys = await listKeys('products/');
-  const out = [];
-  for (const k of keys) { const p = await getJSON(k); if (p) out.push({ ...p, id: k.slice(9) }); }
-  return out;
+  const got = await Promise.all(keys.map(k => getJSON(k)));
+  const list = keys.map((k, i) => got[i] && { ...got[i], id: k.slice(9) }).filter(Boolean);
+  productsMem = { at: Date.now(), list };
+  return list.map(p => ({ ...p }));
 }
+export async function productExists(id) { return Boolean(await getJSON('products/' + String(id))); }
 export async function saveProduct(id, data, who) {
+  productsMem = null;
   const pid = id || newId('p');
   const clean = { ...data }; delete clean.id;
   clean.updatedAt = new Date().toISOString();
@@ -422,6 +443,7 @@ export async function saveProduct(id, data, who) {
   return { ...clean, id: pid };
 }
 export async function deleteProduct(id, who) {
+  productsMem = null;
   const p = await getJSON('products/' + id);
   await delKey('products/' + id);
   if (who) await addLog({ who, kind: '제품 삭제', target: p?.name || id, detail: '' });

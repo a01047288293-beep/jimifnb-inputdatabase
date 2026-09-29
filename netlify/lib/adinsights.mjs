@@ -194,7 +194,9 @@ export function creativeAnalysis(crRows, info, reach, campaignList, days) {
   const formats = [...group(list, c => c.format)].map(([format, cs]) => ({ format, count: cs.length, ...sum(cs) })).sort((a, b) => b.spend - a.spend);
   // 광고비 대비 효율 순위 (구매 3건 이상만)
   const ranked = list.filter(c => c.purchases >= 3 && c.roas != null).sort((a, b) => b.roas - a.roas);
-  return { list, formats, best: ranked.slice(0, 3).map(c => c.key), worst: ranked.slice(-3).reverse().filter(c => ranked.length > 3).map(c => c.key) };
+  const best = ranked.slice(0, 3).map(c => c.key);
+  const worst = ranked.length > 3 ? ranked.slice(3).slice(-3).reverse().map(c => c.key) : [];
+  return { list, formats, best, worst };
 }
 
 /* ---------- 제품별 광고 손익 ---------- */

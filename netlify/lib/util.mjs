@@ -47,7 +47,10 @@ export async function httpJson(url, { method = 'GET', headers = {}, body, timeou
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text.slice(0, 500) }; }
   if (!res.ok) {
     const msg = (data && (data.error?.message || data.error_description || data.message || (typeof data.error === 'string' ? data.error : ''))) || res.statusText;
-    throw new HttpError(res.status === 401 ? 401 : 502, `${label} 오류(${res.status}): ${msg}`, data);
+    // 외부 서비스 오류는 항상 502로 (401을 그대로 넘기면 화면이 운영실 로그아웃으로 오해함). 원래 상태는 upstream 에 보관
+    const err = new HttpError(502, `${label} 오류(${res.status}): ${msg}${res.status === 401 ? ' — 키·토큰이 만료되었거나 잘못되었습니다. 설정·연동에서 확인하세요.' : ''}`, data);
+    err.upstream = res.status;
+    throw err;
   }
   return data;
 }

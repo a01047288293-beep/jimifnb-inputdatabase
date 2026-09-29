@@ -178,11 +178,11 @@ test('카페24 연결: 키 없으면 안내, 잘못된 state 거부', async () =
   assert.equal((await call('GET', '/api/cafe24/connect')).status, 400);
   const cb = await api(new Request('http://localhost/api/cafe24/callback?code=x&state=bad'));
   assert.equal(cb.status, 302); assert.match(cb.headers.get('location'), /cafe24=state/);
+  // 확인값(state) 없이 온 오류는 기록하지 않음 (외부에서 상태 화면을 덮어쓰지 못하게)
   const denied = await api(new Request('http://localhost/api/cafe24/callback?error=invalid_request&error_description=redirect_uri%20mismatch'));
-  assert.match(denied.headers.get('location'), /cafe24=fail/);
+  assert.match(denied.headers.get('location'), /cafe24=state/);
   const st = await call('GET', '/api/status');
-  assert.match(st.json.cafe24Connect.message, /redirect_uri mismatch/);
-  assert.equal(st.json.cafe24Connect.redirectUri, 'http://localhost/api/cafe24/callback');
+  assert.equal(st.json.cafe24Connect, null);
   assert.equal((await call('GET', '/api/없는주소')).status, 404);
   assert.equal((await call('POST', '/api/logout')).status, 200);
 });

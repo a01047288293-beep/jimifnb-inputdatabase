@@ -68,23 +68,46 @@ async function tokenRequest(params) {
   };
   if (!tok.access_token || !tok.refresh_token) throw new HttpError(502, '카페24 인증 응답에 토큰이 없습니다.');
   await setJSON(TOKEN_KEY, tok);
+  tokMem = { tok, readAt: Date.now() };
+  for (const fn of tokenListeners) { try { fn(); } catch { /* 무시 */ } }
   return tok;
 }
+const tokenListeners = [];
+/** 토큰이 새로 저장될 때 알림 (연결 상태 캐시 비우기용) */
+export function onTokenSaved(fn) { tokenListeners.push(fn); }
 export async function exchangeCode(code, redirectUri) {
   return tokenRequest({ grant_type: 'authorization_code', code, redirect_uri: redirectUri });
 }
 /** 만료 30분 전이면 갱신. force=true 면 무조건 갱신(리프레시 토큰 유효기간 연장용) */
+let refreshing = null;
+let tokMem = null; // 같은 서버 안에서 요청마다 저장소를 다시 읽지 않도록 (30초)
 export async function ensureToken(force = false) {
-  const tok = await getJSON(TOKEN_KEY);
+  let tok = tokMem && Date.now() - tokMem.readAt < 30000 ? tokMem.tok : null;
+  if (!tok) { tok = await getJSON(TOKEN_KEY); tokMem = { tok, readAt: Date.now() }; }
   if (!tok) throw new HttpError(409, '카페24가 아직 연결되지 않았습니다. 설정에서 연결하세요.');
   if (tok.refresh_token_expires_at && tok.refresh_token_expires_at < Date.now()) {
     throw new HttpError(409, '카페24 연결이 만료되었습니다. 설정에서 다시 연결하세요.');
   }
-  if (force || tok.expires_at - Date.now() < 30 * 60000) {
-    return tokenRequest({ grant_type: 'refresh_token', refresh_token: tok.refresh_token });
+  if (!(force || tok.expires_at - Date.now() < 30 * 60000)) return tok;
+  // 리프레시 토큰은 한 번만 쓸 수 있어, 동시에 여러 요청이 와도 갱신은 한 번만 (다른 서버가 방금 갱신했으면 그걸 사용)
+  if (!refreshing) {
+    refreshing = (async () => {
+      const latest = await getJSON(TOKEN_KEY);
+      if (latest && latest.saved_at > (tok.saved_at || 0) && latest.expires_at - Date.now() >= 30 * 60000 && !force) return latest;
+      try { return await tokenRequest({ grant_type: 'refresh_token', refresh_token: (latest || tok).refresh_token }); }
+      catch (e) {
+        // 다른 서버(자동 수집)가 먼저 갱신해 이 리프레시 토큰이 무효가 된 경우: 새로 저장된 토큰을 사용
+        const again = await getJSON(TOKEN_KEY);
+        if (again && again.saved_at > ((latest || tok).saved_at || 0)) return again;
+        throw e;
+      }
+    })().finally(() => { refreshing = null; });
   }
-  return tok;
+  const fresh = await refreshing;
+  tokMem = { tok: fresh, readAt: Date.now() };
+  return fresh;
 }
+export function _forgetToken() { tokMem = null; }
 export async function tokenInfo() {
   const tok = await getJSON(TOKEN_KEY);
   if (!tok) return null;
@@ -192,7 +215,7 @@ export async function fetchRefunds(from, to) {
     const q = { shop_no: e.shopNo, start_date: from, end_date: to, date_type: 'refund_date', limit: 100, offset };
     let data;
     try { data = await call('refunds', { query: q }); }
-    catch (err) { if (offset === 0 && err.status === 422) { delete q.date_type; data = await call('refunds', { query: q }); } else throw err; }
+    catch (err) { if (offset === 0 && (err.upstream === 422 || err.upstream === 400)) { delete q.date_type; data = await call('refunds', { query: q }); } else throw err; }
     const list = data?.refunds || [];
     for (const r of list) out.push(normalizeRefund(r));
     if (list.length < 100) break;

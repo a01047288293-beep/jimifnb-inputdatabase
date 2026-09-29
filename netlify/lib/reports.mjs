@@ -10,8 +10,7 @@ export async function adAnalysis(from, to) {
   const days = dateRange(from, [to, kstDate()].sort()[0]);
   const n = dateRange(from, to).length;
   const pFrom = addDays(from, -n), pTo = addDays(from, -1);
-  const settings = await data.getSettings();
-  const products = await data.listProducts();
+  const [settings, products] = await Promise.all([data.getSettings(), data.listProducts()]);
   const idx = A.productIndex(products);
   // 매체 성과·이전 기간·소재·주문을 한꺼번에 동시에 받음
   let orderError = null;

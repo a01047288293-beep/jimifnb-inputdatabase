@@ -84,7 +84,7 @@ export async function render(main) {
       const text = blocks.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
       const tools = blocks.filter(b => b.type === 'tool_use');
       if (text) html += `<div class="msg ai">${md(text)}</div>`;
-      if (tools.length) html += `<div class="adv-tools">${tools.map(t => `<span class="pill info">${esc(TOOL_LABEL[t.name] || t.name)}${t.input?.from ? ` · ${esc(t.input.from.slice(5))}~${esc((t.input.to || '').slice(5))}` : ''}</span>`).join(' ')}</div>`;
+      if (tools.length) html += `<div class="adv-tools">${tools.map(t => `<span class="pill info">${esc(TOOL_LABEL[t.name] || t.name)}${typeof t.input?.from === 'string' ? ` · ${esc(t.input.from.slice(5))}~${esc(String(t.input.to || '').slice(5))}` : ''}</span>`).join(' ')}</div>`;
     }
     if (st.busy) html += `<div class="msg ai typing"><span class="dots"><i></i><i></i><i></i></span> ${esc(st.activity || '생각하는 중')}</div>`;
     log.innerHTML = html;

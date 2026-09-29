@@ -27,8 +27,10 @@ async function body(req) {
 }
 function range(url, maxDays, defDays) {
   const today = kstDate();
-  const to = isYmd(url.searchParams.get('to')) ? url.searchParams.get('to') : today;
-  const from = isYmd(url.searchParams.get('from')) ? url.searchParams.get('from') : addDays(to, -(defDays - 1));
+  let to = isYmd(url.searchParams.get('to')) ? url.searchParams.get('to') : today;
+  if (to > today) to = today;
+  let from = isYmd(url.searchParams.get('from')) ? url.searchParams.get('from') : addDays(to, -(defDays - 1));
+  if (from > today) from = today;
   if (from > to) throw new HttpError(400, '시작일이 종료일보다 늦습니다.');
   if (dateRange(from, to).length > maxDays) throw new HttpError(400, `조회 기간은 최대 ${maxDays}일입니다.`);
   return { from, to, today };
@@ -47,10 +49,13 @@ route('GET', '/api/me', async (req) => {
 }, { public: true });
 
 /* ---------- 상태·설정 ---------- */
-route('GET', '/api/status', async () => json({
-  modes: await data.modes(), settings: await data.getSettings(), sync: await getJSON('status/sync'),
-  cafe24Token: await C.tokenInfo(), cafe24Connect: await getJSON('status/cafe24-connect'), cafe24RedirectUri: process.env.CAFE24_REDIRECT_URI || null, googleConnect: await getJSON('status/google-connect'), googleRedirectUri: process.env.GOOGLE_ADS_REDIRECT_URI || null, ai: aiConfigured(), today: kstDate(), shop: { url: C.SHOP_URL(), mallId: C.MALL_ID() }
-}));
+route('GET', '/api/status', async () => {
+  const [modes, settings, sync, cafe24Token, cafe24Connect, googleConnect] = await Promise.all([data.modes(), data.getSettings(), getJSON('status/sync'), C.tokenInfo(), getJSON('status/cafe24-connect'), getJSON('status/google-connect')]);
+  return json({
+    modes, settings, sync, cafe24Token, cafe24Connect, cafe24RedirectUri: process.env.CAFE24_REDIRECT_URI || null, googleConnect, googleRedirectUri: process.env.GOOGLE_ADS_REDIRECT_URI || null,
+    ai: aiConfigured(), today: kstDate(), shop: { url: C.SHOP_URL(), mallId: C.MALL_ID() }
+  });
+});
 route('PUT', '/api/settings', async (req, s) => json(await data.putSettings(await body(req), who(s))));
 route('POST', '/api/sync', async () => json(await runSync('manual')));
 route('GET', '/api/log', async (req, s, url) => json(await data.listLogs(Math.min(500, num(url.searchParams.get('limit')) || 200))));
@@ -95,14 +100,15 @@ route('GET', '/api/home', async () => {
   const weekOrders = orders.filter(o => o.date >= week[0]);
   const pi = I.productInsights(weekOrders, [], inv, week, idx);
   const camp = A.campaignSummary(ads.campaigns, ads.rows.filter(r => r.date >= week[0]), settings.campaignLinks || {}, products);
+  const tail = await Promise.all([data.listLogs(8), getJSON('status/sync'), data.modes()]);
   return json({
     today, series, ySame, pendingShip, unpaid, delayed, statusCounts, slaHours: settings.shipSlaHours,
     unansweredCs: cs.filter(a => !a.answered).length, stockAlerts: pi.alerts,
     badAds: camp.filter(c => c.verdict === 'bad' && c.status === 'on').length,
     mtd: I.summary(orders.filter(o => o.date >= monthStart)), prevMtd: I.summary(prevMonth), monthLabel: `${Number(today.slice(5, 7))}월`,
     topProducts: pi.products.slice(0, 5).map(p => ({ productNo: p.productNo, name: p.name, qty: p.qty, revenue: p.revenue, spark: p.spark })),
-    productsCount: products.length, logs: (await data.listLogs(8)), sync: await getJSON('status/sync'),
-    modes: await data.modes(), errors, shop: { url: C.SHOP_URL(), mallId: C.MALL_ID() }
+    productsCount: products.length, logs: tail[0], sync: tail[1],
+    modes: tail[2], errors, shop: { url: C.SHOP_URL(), mallId: C.MALL_ID() }
   });
 });
 
@@ -208,12 +214,10 @@ route('POST', '/api/cs/draft', async (req) => {
 /* ---------- 매출 ---------- */
 route('GET', '/api/sales', async (req, s, url) => {
   const { from, to } = range(url, 92, 30);
-  const products = await data.listProducts();
+  const [products, orders, ads, modes] = await Promise.all([data.listProducts(), data.ordersForStats(from, to), data.allAds(from, to), data.modes()]);
   const idx = A.productIndex(products);
-  const orders = await data.ordersForStats(from, to);
-  const ads = await data.allAds(from, to);
   const days = dateRange(from, [to, kstDate()].sort()[0]);
-  return json({ from, to, series: A.dailySeries(days, orders, ads.rows, idx), products: A.productTable(orders, idx), errors: ads.errors, modes: await data.modes() });
+  return json({ from, to, series: A.dailySeries(days, orders, ads.rows, idx), products: A.productTable(orders, idx), errors: ads.errors, modes });
 });
 
 /* ---------- 운영 분석 ---------- */
@@ -277,8 +281,7 @@ route('POST', '/api/products', async (req, s) => {
   return json(await data.saveProduct(null, { ...blankProduct(), ...b }, who(s)), 201);
 });
 route('PUT', '/api/products/:id', async (req, s, url, p) => {
-  const prev = (await data.listProducts()).find(x => x.id === p.id);
-  if (!prev) throw new HttpError(404, '제품을 찾지 못했습니다.');
+  if (!(await data.productExists(p.id))) throw new HttpError(404, '제품을 찾지 못했습니다.');
   return json(await data.saveProduct(p.id, await body(req), who(s)));
 });
 route('DELETE', '/api/products/:id', async (req, s, url, p) => { await data.deleteProduct(p.id, who(s)); return json({ ok: true }); });
@@ -372,9 +375,9 @@ route('GET', '/api/cafe24/callback', async (req, s, url) => {
     return back(q);
   };
   // 카페24가 오류를 붙여 돌려보낸 경우 (권한 거부, 주소 불일치 등)
-  if (url.searchParams.get('error')) return fail('fail', `카페24 응답: ${url.searchParams.get('error')} ${url.searchParams.get('error_description') || ''}`);
   const st = verifyState(url.searchParams.get('state'));
-  if (!st || st.k !== 'cafe24') return fail('state', '연결 요청 확인값(state)이 맞지 않습니다. 설정·연동에서 다시 시도하세요.');
+  if (!st || st.k !== 'cafe24') return back('state'); // 확인값이 틀리면 아무것도 저장하지 않음 (외부에서 임의로 상태를 덮어쓰지 못하게)
+  if (url.searchParams.get('error')) return fail('fail', `카페24 응답: ${url.searchParams.get('error')} ${url.searchParams.get('error_description') || ''}`);
   const code = url.searchParams.get('code');
   if (!code) return fail('denied', '카페24에서 인증 코드를 받지 못했습니다.');
   try {
@@ -397,9 +400,9 @@ route('GET', '/api/google/callback', async (req, s, url) => {
   const redirectUri = G.googleRedirectUri(origin);
   const back = q => new Response(null, { status: 302, headers: { location: `${origin}/#/settings?google=${q}` } });
   const fail = async (q, message) => { await setJSON('status/google-connect', { at: new Date().toISOString(), ok: false, message: String(message || '').slice(0, 400), redirectUri }); return back(q); };
-  if (url.searchParams.get('error')) return fail('fail', `구글 응답: ${url.searchParams.get('error')}`);
   const st = verifyState(url.searchParams.get('state'));
-  if (!st || st.k !== 'google') return fail('state', '연결 요청 확인값(state)이 맞지 않습니다. 다시 시도하세요.');
+  if (!st || st.k !== 'google') return back('state');
+  if (url.searchParams.get('error')) return fail('fail', `구글 응답: ${url.searchParams.get('error')}`);
   const code = url.searchParams.get('code');
   if (!code) return fail('denied', '구글에서 인증 코드를 받지 못했습니다.');
   try {
