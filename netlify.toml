@@ -1,0 +1,17 @@
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  node_bundler = "esbuild"
+
+# 화면 새로고침 시에도 앱이 열리도록 (해시 라우팅이라 필수는 아니지만 안전장치)
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "same-origin"
