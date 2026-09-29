@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>개인정보처리방침 · 지미에프앤비 내부 운영실</title>
+<style>
+  :root{color-scheme:light dark;--bg:#fff;--fg:#1b1f24;--muted:#5b6470;--line:#e3e6ea}
+  @media (prefers-color-scheme:dark){:root{--bg:#0b0e13;--fg:#e8ebef;--muted:#9aa3ae;--line:#232a33}}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.7 -apple-system,BlinkMacSystemFont,"Pretendard","Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+  main{max-width:760px;margin:0 auto;padding:40px 16px 64px}
+  h1{font-size:24px;margin:0 0 4px} h2{font-size:17px;margin:28px 0 6px;padding-top:16px;border-top:1px solid var(--line)}
+  p,li{color:var(--fg)} .muted{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <h1>개인정보처리방침</h1>
+  <p class="muted">지미에프앤비 내부 운영실 · 시행일 2026년 9월 29일</p>
+
+  <p>지미에프앤비 내부 운영실(이하 "운영실")은 주식회사 지미에프앤비(이하 "회사")가 자사 쇼핑몰 운영, 주문·고객 문의 처리, 광고 성과 관리를 위해 내부 직원만 사용하는 업무용 도구입니다. 일반 이용자에게 제공되는 서비스가 아닙니다.</p>
+
+  <h2>1. 처리하는 정보</h2>
+  <ul>
+    <li><b>구글 Ads·메타 광고 데이터:</b> 회사가 소유한 광고 계정의 캠페인·광고 이름, 노출·클릭·전환·비용 등 성과 수치. 운영실은 Google Ads API(범위: <code>https://www.googleapis.com/auth/adwords</code>)를 회사 광고 계정의 조회와 캠페인 상태·예산 변경에만 사용합니다.</li>
+    <li><b>구글 계정 인증 정보:</b> 연결을 승인한 계정의 갱신 토큰. 광고 데이터를 불러오는 용도로만 암호화된 저장소에 보관합니다.</li>
+    <li><b>쇼핑몰 주문 정보:</b> 카페24 쇼핑몰의 주문 번호·상품·금액·상태. 주문자 이름은 가려서 표시하고, 받는 분 연락처·주소는 화면에 잠시 보여줄 뿐 저장하지 않습니다.</li>
+  </ul>
+
+  <h2>2. 이용 목적</h2>
+  <p>매출·주문 관리, 고객 문의 답변, 광고 성과 분석과 예산 관리에만 사용합니다. 광고 타겟팅, 판매, 제3자 제공 목적으로 사용하지 않습니다.</p>
+
+  <h2>3. 제3자 제공 및 공유</h2>
+  <p>수집한 정보는 제3자에게 판매하거나 제공하지 않습니다. 구글 API로 받은 정보의 사용은 <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API 서비스 사용자 데이터 정책</a>(제한적 사용 요건 포함)을 따릅니다.</p>
+
+  <h2>4. 보관 및 파기</h2>
+  <p>광고·주문 집계 데이터는 분석을 위해 최대 1년간 보관하며, 연결을 해제하거나 보관 기간이 지나면 삭제합니다. 구글 연결은 <a href="https://myaccount.google.com/permissions">구글 계정 → 서드 파티 연결</a>에서 언제든 해제할 수 있으며, 해제 시 저장된 토큰은 더 이상 사용되지 않습니다.</p>
+
+  <h2>5. 안전성 확보</h2>
+  <p>운영실은 비밀번호 로그인과 사이트 접근 비밀번호로 보호되며, 인증 키는 호스팅 환경변수와 암호화된 저장소에만 둡니다.</p>
+
+  <h2>6. 문의</h2>
+  <p>주식회사 지미에프앤비 · 개인정보 보호 담당: 대표이사 김민웅<br>이메일: jimifnb@jimifnb0901.com</p>
+</main>
+</body>
+</html>
