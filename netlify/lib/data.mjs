@@ -27,16 +27,16 @@ export async function modes() {
 /* ---------- 설정 ---------- */
 export const DEFAULT_SETTINGS = {
   rulesDryRun: true, maxActionsPerDay: 20, minBudget: 10000, maxBudgetChangePct: 50,
-  csWriter: '지미에프앤비', campaignLinks: {}, defaultFeePct: 3.5
+  csWriter: '지미에프앤비', campaignLinks: {}, defaultFeePct: 3.5, shipSlaHours: 48
 };
 export async function getSettings() { return { ...DEFAULT_SETTINGS, ...((await getJSON('settings')) || {}) }; }
 export async function putSettings(patch, who) {
   const cur = await getSettings();
   const next = { ...cur };
-  const allowed = ['rulesDryRun', 'maxActionsPerDay', 'minBudget', 'maxBudgetChangePct', 'csWriter', 'defaultFeePct'];
+  const allowed = ['rulesDryRun', 'maxActionsPerDay', 'minBudget', 'maxBudgetChangePct', 'csWriter', 'defaultFeePct', 'shipSlaHours'];
   for (const k of allowed) if (k in patch) next[k] = patch[k];
   next.rulesDryRun = Boolean(next.rulesDryRun);
-  for (const k of ['maxActionsPerDay', 'minBudget', 'maxBudgetChangePct', 'defaultFeePct']) {
+  for (const k of ['maxActionsPerDay', 'minBudget', 'maxBudgetChangePct', 'defaultFeePct', 'shipSlaHours']) {
     const n = Number(next[k]); if (!Number.isFinite(n) || n < 0) throw new HttpError(400, `설정값이 올바르지 않습니다: ${k}`); next[k] = n;
   }
   next.maxBudgetChangePct = Math.min(next.maxBudgetChangePct, 100);
@@ -70,39 +70,84 @@ export async function listLogs(limit = 200) {
   return out.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, limit);
 }
 
-/* ---------- 캐시: 지난 날짜는 저장본, 최근 2일은 짧게만 저장 ---------- */
-async function cachedDaily(prefix, from, to, fetchRange) {
+/* ---------- 캐시: 날짜별 저장. 최근 2일은 10분, 최근 14일은 6시간마다 새로 받고(상태·반품 변화 반영), 그 이전은 저장본 사용 ---------- */
+function freshEnough(d, hit, today) {
+  if (!hit) return false;
+  const age = Date.now() - hit.at;
+  if (d >= addDays(today, -1)) return age < 10 * 60000;
+  if (d >= addDays(today, -14)) return age < 6 * 3600000;
+  return true;
+}
+async function inBatches(items, size, fn) {
+  for (let i = 0; i < items.length; i += size) await Promise.all(items.slice(i, i + size).map(fn));
+}
+/** maxFetch: 한 번에 외부에서 새로 받을 최대 일수 (나머지는 missing 으로 알려줌) */
+async function cachedDaily(prefix, from, to, fetchRange, { maxFetch = 400 } = {}) {
   const today = kstDate();
   const days = dateRange(from, [to, today].sort()[0]);
   const result = {};
-  const missing = [];
+  const hits = {};
+  await inBatches(days, 20, async d => { hits[d] = await getJSON(`${prefix}/${d}`); });
+  const stale = [];
   for (const d of days) {
-    const recent = d >= addDays(today, -1);
-    const hit = await getJSON(`${prefix}/${d}`);
-    if (hit && (!recent || Date.now() - hit.at < 10 * 60000)) result[d] = hit.rows;
-    else missing.push(d);
+    if (freshEnough(d, hits[d], today)) result[d] = hits[d].rows;
+    else stale.push(d);
   }
-  if (missing.length) {
-    const a = missing[0], b = missing[missing.length - 1];
+  // 최신 날짜부터 채움
+  const toFetch = maxFetch > 0 ? stale.slice(-maxFetch) : [];
+  const skipped = stale.slice(0, stale.length - toFetch.length);
+  if (toFetch.length) {
+    const a = toFetch[0], b = toFetch[toFetch.length - 1];
     const rows = await fetchRange(a, b);
     const byDay = {};
     for (const d of dateRange(a, b)) byDay[d] = [];
     for (const r of rows) if (byDay[r.date]) byDay[r.date].push(r);
-    for (const d of Object.keys(byDay)) {
-      if (!missing.includes(d) && result[d]) continue;
-      result[d] = byDay[d];
-      await setJSON(`${prefix}/${d}`, { at: Date.now(), rows: byDay[d] });
-    }
+    const write = Object.keys(byDay).filter(d => toFetch.includes(d) || !result[d]);
+    await inBatches(write, 10, async d => { result[d] = byDay[d]; await setJSON(`${prefix}/${d}`, { at: Date.now(), rows: byDay[d] }); });
   }
-  return days.flatMap(d => result[d] || []);
+  // 받지 못한 날짜는 예전 저장본이라도 사용
+  for (const d of skipped) if (hits[d]) result[d] = hits[d].rows;
+  const rows = days.flatMap(d => result[d] || []);
+  rows.missingDays = skipped.filter(d => !hits[d]).length;
+  return rows;
 }
 
 /* ---------- 주문 ---------- */
-export async function ordersForStats(from, to) {
+const ORDER_CACHE = 'cache/orders2';
+export async function ordersForStats(from, to, opts = {}) {
   const m = await mode('cafe24');
   if (m === 'off') return [];
   if (m === 'demo') return D.demoOrders(from, to);
-  return cachedDaily('cache/orders', from, to, C.fetchOrders);
+  return cachedDaily(ORDER_CACHE, from, to, C.fetchOrders, { maxFetch: opts.maxFetch ?? 62 });
+}
+/** 과거 주문 기록 채우기: 자동 수집 때마다 오래된 빈 날짜를 조금씩 채움 */
+export async function backfillOrders(days = 365, perRun = 45) {
+  if ((await mode('cafe24')) !== 'live') return '해당 없음';
+  const today = kstDate();
+  const all = dateRange(addDays(today, -(days - 1)), today);
+  const have = new Set((await listKeys(ORDER_CACHE + '/')).map(k => k.slice(ORDER_CACHE.length + 1)));
+  const missing = all.filter(d => !have.has(d));
+  if (!missing.length) return `${days}일 기록 완료`;
+  const chunk = missing.slice(0, perRun);
+  await cachedDaily(ORDER_CACHE, chunk[0], chunk[chunk.length - 1], C.fetchOrders, { maxFetch: perRun + 31 });
+  return `기록 채우는 중: ${all.length - missing.length + chunk.length}/${all.length}일`;
+}
+export async function historyCoverage(days = 365) {
+  if ((await mode('cafe24')) !== 'live') return { have: days, total: days };
+  const today = kstDate();
+  const all = new Set(dateRange(addDays(today, -(days - 1)), today));
+  const have = (await listKeys(ORDER_CACHE + '/')).filter(k => all.has(k.slice(ORDER_CACHE.length + 1))).length;
+  return { have, total: days };
+}
+export async function inventory() {
+  const m = await mode('cafe24');
+  if (m === 'off') return [];
+  if (m === 'demo') return D.demoInventory();
+  const hit = await getJSON('cache/inventory');
+  if (hit && Date.now() - hit.at < 10 * 60000) return hit.rows;
+  const rows = await C.fetchInventory();
+  await setJSON('cache/inventory', { at: Date.now(), rows });
+  return rows;
 }
 export async function ordersLive(from, to) {
   const m = await mode('cafe24');

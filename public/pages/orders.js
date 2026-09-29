@@ -1,4 +1,5 @@
 import { api, esc, won, nf, srcTag, modal, toast, kstToday, addDays, go, shopLink } from '../app.js';
+import { downloadCsv } from './fulfillment.js';
 
 const GROUPS = [
   { id: 'all', label: '전체', test: () => true },
@@ -33,6 +34,7 @@ export async function render(main, { query }) {
     <section class="box">
       <div class="box-h"><h2>${esc(GROUPS.find(g => g.id === st.group).label)} ${nf(list.length)}건</h2>
         <div class="row"><span class="hint">결제금액 합계 ${won(total)} (취소 제외)</span>
+        ${list.length ? '<button class="btn" id="o-csv">목록 내려받기(CSV)</button>' : ''}
         ${st.group === 'ready' ? '<button class="btn primary" id="bulk-ship" disabled>선택 주문 송장 입력</button>' : ''}</div></div>
       ${list.length ? `<div class="tbl-wrap"><table><thead><tr>${st.group === 'ready' ? '<th><input type="checkbox" id="sel-all" aria-label="전체 선택"></th>' : ''}<th>결제 시각</th><th>주문번호</th><th>상품</th><th class="n">수량</th><th class="n">결제금액</th><th>구매자</th><th>상태</th><th></th></tr></thead><tbody>
       ${list.map(o => {
@@ -49,6 +51,12 @@ export async function render(main, { query }) {
     </section>
   </div>`;
 
+  const csv = main.querySelector('#o-csv');
+  if (csv) csv.onclick = () => {
+    const rows = [['결제시각', '주문번호', '상품', '옵션', '수량', '결제금액', '결제수단', '구매자', '상태']];
+    for (const o of list) for (const it of o.items) rows.push([String(o.time).slice(0, 16).replace('T', ' '), o.id, it.name, it.option, it.qty, o.amount, o.payment || '', o.buyer, o.statusLabel]);
+    downloadCsv(`주문_${st.from}_${st.to}.csv`, rows);
+  };
   const reload = patch => { const n = { ...st, ...patch }; go(`#/orders?from=${n.from}&to=${n.to}&group=${n.group}`); };
   main.querySelector('#o-from').onchange = e => reload({ from: e.target.value });
   main.querySelector('#o-to').onchange = e => reload({ to: e.target.value });

@@ -21,7 +21,9 @@ export async function runSync(trigger = 'schedule') {
       await C.ensureToken(force);
       return force ? '토큰 갱신' : '정상';
     });
-    await step('주문 수집', async () => `${(await data.ordersForStats(addDays(today, -1), today)).length}건`);
+    await step('주문 수집', async () => `${(await data.ordersForStats(addDays(today, -13), today)).length}건`);
+    // 남은 시간 안에서만 과거 기록을 조금씩 채움 (분석용 1년치)
+    if (Date.now() - started < 12000) await step('과거 기록 채우기', () => data.backfillOrders(365, 30));
   }
   await step('광고 성과 수집', async () => {
     const ads = await data.allAds(addDays(today, -6), today);

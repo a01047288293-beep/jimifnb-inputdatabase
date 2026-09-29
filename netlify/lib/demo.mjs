@@ -12,6 +12,12 @@ export const DEMO_PRODUCTS = [
   { productNo: 103, name: '수제 떡갈비 6팩', price: 39900 },
   { productNo: 104, name: '선물세트 (불고기+떡갈비)', price: 69900 }
 ];
+const PAYMENTS = ['카드', '카드', '카드', '네이버페이', '네이버페이', '카카오페이', '무통장입금', '토스페이'];
+const CHANNELS = ['모바일 웹', '모바일 웹', '모바일 웹', 'PC', '네이버 체크아웃', '카카오 톡체크아웃'];
+const REGIONS = ['서울', '서울', '서울', '경기', '경기', '경기', '인천', '부산', '대구', '광주', '광주', '전남', '대전', '경남', '충남', '강원', '제주'];
+const OPTIONS = { 101: ['1팩', '2팩 세트', '3팩 세트'], 102: ['오리지널', '매운맛', '카레맛'], 103: ['6팩', '12팩'], 104: [''] };
+const CLAIM_REASONS = ['단순 변심', '배송 지연', '포장 파손', '주문 실수', '상품 불만족'];
+const MEMBERS = Array.from({ length: 1400 }, (_, i) => 'm' + i);
 const NAMES = ['김서연', '이도윤', '박지우', '최하준', '정서아', '강민준', '조하은', '윤지호', '장예린', '임도현', '한수아', '오지훈'];
 const ITEM_STATUS_BY_AGE = age => age === 0 ? ['N10', 'N20', 'N20', 'N00'] : age === 1 ? ['N20', 'N21', 'N30'] : age <= 3 ? ['N30', 'N40'] : ['N40', 'N50', 'N50'];
 
@@ -38,21 +44,44 @@ export async function demoOrders(from, to) {
       const statuses = ITEM_STATUS_BY_AGE(age);
       let status = statuses[Math.floor(r() * statuses.length)];
       if (r() < 0.04) status = age < 2 ? 'C00' : 'C40';
+      else if (age >= 2 && age <= 4 && r() < 0.05) status = 'N20'; // 출고가 늦어진 주문
       else if (age > 3 && r() < 0.03) status = 'R40';
       if (st.shipped[id] && status.startsWith('N') && status < 'N30') status = 'N30';
       const nowH = new Date(Date.now() + 9 * 3600000).getUTCHours();
       const maxH = d === today ? Math.max(1, nowH - 7) : 14;
       const hh = String(Math.min(23, 8 + Math.floor(r() * maxH))).padStart(2, '0'), mm = String(Math.floor(r() * 60)).padStart(2, '0');
       const ship = p.price * qty >= 50000 ? 0 : 3500;
+      const time = `${d}T${hh}:${mm}:00+09:00`;
+      // 결제 후 출고까지 12~60시간, 배송 1~2일
+      const shipH = 12 + Math.floor(r() * 48);
+      const shippedAt = ['N30', 'N40', 'N50', 'R40'].includes(status) ? new Date(Date.parse(time) + shipH * 3600000).toISOString() : null;
+      const deliveredAt = ['N40', 'N50', 'R40'].includes(status) ? new Date(Date.parse(time) + (shipH + 24 + Math.floor(r() * 24)) * 3600000).toISOString() : null;
+      const isMember = r() < 0.72;
+      const mIdx = Math.floor(Math.pow(r(), 2.2) * MEMBERS.length); // 소수 단골이 자주 사고 대부분은 한두 번
+      const opts = OPTIONS[p.productNo] || [''];
+      const buyer = NAMES[(mIdx + (isMember ? 0 : 5)) % NAMES.length].replace(/^(.).(.)$/, '$1*$2');
       out.push({
-        id, date: d, time: `${d}T${hh}:${mm}:00+09:00`, status,
-        amount: p.price * qty + ship, shippingFee: ship,
-        buyer: NAMES[Math.floor(r() * NAMES.length)].replace(/^(.).(.)$/, '$1*$2'),
-        canceled: status.startsWith('C'), channel: r() < 0.7 ? '모바일' : 'PC',
+        id, date: d, time, orderedAt: time, status,
+        amount: p.price * qty + ship, shippingFee: ship, buyer,
+        canceled: status.startsWith('C'), channel: CHANNELS[Math.floor(r() * CHANNELS.length)],
+        payment: PAYMENTS[Math.floor(r() * PAYMENTS.length)],
+        firstOrder: null,
+        member: isMember ? MEMBERS[mIdx] : null,
+        region: REGIONS[Math.floor(r() * REGIONS.length)],
+        claimReason: /^[CR]/.test(status) ? CLAIM_REASONS[Math.floor(r() * CLAIM_REASONS.length)] : null,
         tracking: st.shipped[id] || null,
-        items: [{ itemCode: id + '-01', productNo: p.productNo, name: p.name, option: '', qty, price: p.price, status }]
+        items: [{ itemCode: id + '-01', productNo: p.productNo, name: p.name, option: opts[Math.floor(r() * opts.length)], variant: '', qty, price: p.price, status, shippedAt, deliveredAt, claimReason: null }]
       });
     }
+  }
+  return out;
+}
+export async function demoInventory() {
+  const r = rng('inv' + kstDate());
+  const out = [];
+  for (const p of DEMO_PRODUCTS) for (const o of OPTIONS[p.productNo] || ['']) {
+    const q = p.productNo === 102 && o === '카레맛' ? 0 : p.productNo === 103 && o === '12팩' ? 4 : Math.floor(10 + r() * 120);
+    out.push({ productNo: p.productNo, name: p.name, price: p.price, variant: `${p.productNo}-${o}`, option: o, selling: true, display: true, soldOut: q === 0, tracked: true, quantity: q, safety: 10 });
   }
   return out;
 }

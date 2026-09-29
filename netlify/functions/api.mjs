@@ -5,6 +5,7 @@ import * as data from '../lib/data.mjs';
 import * as C from '../lib/cafe24.mjs';
 import * as R from '../lib/rules.mjs';
 import * as A from '../lib/analytics.mjs';
+import * as I from '../lib/insights.mjs';
 import { runSync } from '../lib/sync.mjs';
 import { getJSON, setJSON } from '../lib/store.mjs';
 import { draftReply, aiConfigured } from '../lib/ai.mjs';
@@ -56,18 +57,41 @@ route('GET', '/api/home', async () => {
   const days = dateRange(from, today);
   const errors = [];
   const safe = async (label, fn, fb) => { try { return await fn(); } catch (e) { errors.push(`${label}: ${e.message}`); return fb; } };
+  const settings = await data.getSettings();
   const products = await data.listProducts();
   const idx = A.productIndex(products);
-  const orders = await safe('주문', () => data.ordersForStats(from, today), []);
+  // 이번 달 누적과 지난달 같은 날짜까지 비교
+  const monthStart = today.slice(0, 8) + '01';
+  const dayOfMonth = Number(today.slice(8));
+  const pmEndRaw = addDays(monthStart, -1);
+  const pmStart = pmEndRaw.slice(0, 8) + '01';
+  const pmEnd = [addDays(pmStart, dayOfMonth - 1), pmEndRaw].sort()[0];
+  const orders = await safe('주문', () => data.ordersForStats([from, monthStart].sort()[0], today), []);
+  const prevMonth = await safe('지난달 주문', () => data.ordersForStats(pmStart, pmEnd), []);
   const ads = await data.allAds(from, today);
   for (const e of ads.errors) errors.push(`${data.PLATFORM_LABEL[e.platform]}: ${e.message}`);
   const series = A.dailySeries(days, orders, ads.rows, idx);
-  const recent = await safe('출고 대기', () => data.ordersLive(addDays(today, -6), today), []);
+  // 어제 같은 시각까지의 매출 (오늘은 하루가 끝나지 않았으므로 공정하게 비교)
+  const nowK = new Date(Date.now() + 9 * 3600000);
+  const nowMin = nowK.getUTCHours() * 60 + nowK.getUTCMinutes();
+  const yday = addDays(today, -1);
+  const ySame = I.summary(orders.filter(o => o.date === yday && (() => { const [, h] = I.kstParts(o); const m = Number(String(o.time).slice(14, 16)) || 0; return h * 60 + m <= nowMin; })()));
+  const recent = await safe('출고 대기', () => data.ordersLive(addDays(today, -13), today), []);
   const pendingShip = recent.filter(o => ['N10', 'N20', 'N21', 'N22'].includes(o.status)).length;
   const unpaid = recent.filter(o => o.status === 'N00').length;
+  const delayed = I.fulfillmentInsights(recent, { slaHours: settings.shipSlaHours }).delayed.length;
   const cs = await safe('문의', () => data.articles(addDays(today, -29), today), []);
+  const inv = await safe('재고', () => data.inventory(), []);
+  const week = dateRange(addDays(today, -6), today);
+  const weekOrders = orders.filter(o => o.date >= week[0]);
+  const pi = I.productInsights(weekOrders, [], inv, week, idx);
+  const camp = A.campaignSummary(ads.campaigns, ads.rows.filter(r => r.date >= week[0]), settings.campaignLinks || {}, products);
   return json({
-    today, series, pendingShip, unpaid, unansweredCs: cs.filter(a => !a.answered).length,
+    today, series, ySame, pendingShip, unpaid, delayed, slaHours: settings.shipSlaHours,
+    unansweredCs: cs.filter(a => !a.answered).length, stockAlerts: pi.alerts,
+    badAds: camp.filter(c => c.verdict === 'bad' && c.status === 'on').length,
+    mtd: I.summary(orders.filter(o => o.date >= monthStart)), prevMtd: I.summary(prevMonth), monthLabel: `${Number(today.slice(5, 7))}월`,
+    topProducts: pi.products.slice(0, 5).map(p => ({ productNo: p.productNo, name: p.name, qty: p.qty, revenue: p.revenue, spark: p.spark })),
     productsCount: products.length, logs: (await data.listLogs(8)), sync: await getJSON('status/sync'),
     modes: await data.modes(), errors, shop: { url: C.SHOP_URL(), mallId: C.MALL_ID() }
   });
@@ -121,6 +145,58 @@ route('GET', '/api/sales', async (req, s, url) => {
   const ads = await data.allAds(from, to);
   const days = dateRange(from, [to, kstDate()].sort()[0]);
   return json({ from, to, series: A.dailySeries(days, orders, ads.rows, idx), products: A.productTable(orders, idx), errors: ads.errors, modes: await data.modes() });
+});
+
+/* ---------- 운영 분석 ---------- */
+function periods(from, to) {
+  const n = dateRange(from, to).length;
+  const pTo = addDays(from, -1), pFrom = addDays(pTo, -(n - 1));
+  const lyFrom = String(Number(from.slice(0, 4)) - 1) + from.slice(4), lyTo = String(Number(to.slice(0, 4)) - 1) + to.slice(4);
+  return { n, pFrom, pTo, lyFrom: isYmd(lyFrom) ? lyFrom : addDays(from, -365), lyTo: isYmd(lyTo) ? lyTo : addDays(to, -365) };
+}
+route('GET', '/api/insights/sales', async (req, s, url) => {
+  const { from, to } = range(url, 184, 30);
+  const P = periods(from, to);
+  const orders = await data.ordersForStats(from, to);
+  const prev = await data.ordersForStats(P.pFrom, P.pTo);
+  // 작년 같은 기간은 이미 모아 둔 기록이 있을 때만 (외부 호출 없음)
+  const ly = await data.ordersForStats(P.lyFrom, P.lyTo, { maxFetch: 0 });
+  const lyComplete = (ly.missingDays || 0) === 0 && (await data.mode('cafe24')) !== 'demo';
+  const days = dateRange(from, [to, kstDate()].sort()[0]);
+  const products = await data.listProducts();
+  const ads = await data.allAds(from, to);
+  const out = I.salesInsights(orders, prev, lyComplete ? ly : null, days);
+  out.prevDaily = I.salesInsights(prev, null, null, dateRange(P.pFrom, P.pTo)).daily;
+  out.profit = A.dailySeries(days, orders, ads.rows, A.productIndex(products));
+  return json({ from, to, prevFrom: P.pFrom, prevTo: P.pTo, ...out, missingDays: orders.missingDays || 0, mode: await data.mode('cafe24'), adErrors: ads.errors });
+});
+route('GET', '/api/insights/products', async (req, s, url) => {
+  const { from, to } = range(url, 184, 30);
+  const P = periods(from, to);
+  const orders = await data.ordersForStats(from, to);
+  const prev = await data.ordersForStats(P.pFrom, P.pTo);
+  let inv = [], invError = null;
+  try { inv = await data.inventory(); } catch (e) { invError = e.message; }
+  const days = dateRange(from, [to, kstDate()].sort()[0]);
+  const idx = A.productIndex(await data.listProducts());
+  return json({ from, to, days, ...I.productInsights(orders, prev, inv, days, idx), invError, mode: await data.mode('cafe24') });
+});
+route('GET', '/api/insights/customers', async (req, s, url) => {
+  const { from, to, today } = range(url, 184, 90);
+  const orders = await data.ordersForStats(from, to);
+  const history = await data.ordersForStats(addDays(today, -364), today);
+  return json({ from, to, ...I.customerInsights(orders, history, from), coverage: await data.historyCoverage(365), mode: await data.mode('cafe24') });
+});
+route('GET', '/api/insights/fulfillment', async (req, s, url) => {
+  const { from, to, today } = range(url, 92, 30);
+  const settings = await data.getSettings();
+  const orders = await data.ordersForStats(from, to);
+  // 지연 주문은 현재 상태가 중요해 최근 14일을 실시간으로
+  const live = await data.ordersLive(addDays(today, -13), today).catch(() => []);
+  const days = dateRange(from, [to, today].sort()[0]);
+  const f = I.fulfillmentInsights(orders, { slaHours: settings.shipSlaHours, days });
+  f.delayed = I.fulfillmentInsights(live, { slaHours: settings.shipSlaHours }).delayed;
+  return json({ from, to, ...f, mode: await data.mode('cafe24') });
 });
 
 /* ---------- 제품(마진) ---------- */

@@ -1,4 +1,4 @@
-// 지미 운영실 — 화면 뼈대: 로그인, 메뉴, 주소별 화면 전환, 공통 도구
+// 지미에프앤비 내부 운영실 — 화면 뼈대: 로그인, 메뉴, 주소별 화면 전환, 공통 도구
 import * as home from './pages/home.js';
 import * as orders from './pages/orders.js';
 import * as cs from './pages/cs.js';
@@ -8,6 +8,9 @@ import * as ads from './pages/ads.js';
 import * as rules from './pages/rules.js';
 import * as log from './pages/log.js';
 import * as settings from './pages/settings.js';
+import * as stock from './pages/stock.js';
+import * as customers from './pages/customers.js';
+import * as fulfillment from './pages/fulfillment.js';
 
 /* ---------- 공통 도구 ---------- */
 export const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -78,57 +81,63 @@ export function confirmBox(message, okLabel = '확인', danger = false) {
 export function errBox(e) { return `<div class="err">${esc(e.message || e)}</div>`; }
 export function loading() { return '<div class="empty">불러오는 중…</div>'; }
 
-/** 막대(매출·광고비) + 선(이익) 차트 */
-export function barLineChart(series, { bars, line: lineOpt, height = 220 }) {
-  let line = lineOpt;
-  const W = 760, H = height, L = 56, R = 12, T = 12, B = 28;
-  const n = series.length || 1;
-  const vals = series.flatMap(d => [...bars.map(b => d[b.key] || 0), line && d[line.key] != null ? d[line.key] : 0]);
-  let max = Math.max(1, ...vals), min = Math.min(0, ...vals);
-  const step = niceStep((max - min) / 4);
-  max = Math.ceil(max / step) * step; min = Math.floor(min / step) * step;
-  const y = v => T + (max - v) / (max - min) * (H - T - B);
-  const bw = (W - L - R) / n;
-  const inner = Math.max(2, (bw * 0.7) / bars.length);
-  let g = '';
-  for (let v = min; v <= max + 1e-9; v += step) g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="${v === 0 ? 1.2 : .6}"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${man(v)}</text>`;
-  series.forEach((d, i) => {
-    const x0 = L + i * bw + bw * 0.15;
-    bars.forEach((b, j) => {
-      const v = d[b.key] || 0; const y1 = y(Math.max(v, 0)), y2 = y(Math.min(v, 0));
-      g += `<rect x="${x0 + j * inner}" y="${y1}" width="${inner - 1}" height="${Math.max(0.5, y2 - y1)}" fill="${b.color}" rx="1.5"><title>${esc(d.date)} ${esc(b.label)} ${won(v)}</title></rect>`;
-    });
-    if (n <= 16 || i % Math.ceil(n / 12) === 0 || i === n - 1) g += `<text x="${L + i * bw + bw / 2}" y="${H - 8}" text-anchor="middle">${esc(String(d.date).slice(5).replace('-', '/'))}</text>`;
-  });
-  if (line && series.some(d => d[line.key] != null)) {
-    // 값이 없는 날(null)은 선을 끊는다
-    let seg = [];
-    const flush = () => { if (seg.length > 1) g += `<polyline points="${seg.join(' ')}" fill="none" stroke="${line.color}" stroke-width="2"/>`; seg = []; };
-    series.forEach((d, i) => { if (d[line.key] == null) flush(); else seg.push(`${L + i * bw + bw / 2},${y(d[line.key])}`); });
-    flush();
-    series.forEach((d, i) => { if (d[line.key] != null) g += `<circle cx="${L + i * bw + bw / 2}" cy="${y(d[line.key])}" r="${i === n - 1 ? 3.5 : 2}" fill="${line.color}"><title>${esc(d.date)} ${esc(line.label)} ${won(d[line.key])}</title></circle>`; });
-  } else line = null;
-  const legend = [...bars.map(b => `<span><i style="background:${b.color}"></i>${esc(b.label)}</span>`), line ? `<span><i style="background:${line.color}"></i>${esc(line.label)}</span>` : ''].join('');
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(bars.map(b => b.label).join(', '))} 차트">${g}</svg><div class="legend">${legend}</div>`;
+/** 기간 선택 막대: presets = 일수 목록 */
+export function readPeriod(query, defDays) {
+  const today = kstToday();
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(query.get('to') || '') ? query.get('to') : today;
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(query.get('from') || '') ? query.get('from') : addDays(to, -(defDays - 1));
+  return { from, to, today };
 }
-function niceStep(raw) {
-  const p = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1))));
-  for (const m of [1, 2, 2.5, 5, 10]) if (raw <= m * p) return m * p;
-  return 10 * p;
+export function periodBar({ from, to, today }, presets = [7, 30, 90, 180], max = 184) {
+  const cur = to === today ? Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1 : null;
+  return `<div class="toolbar"><div class="seg" data-period>${presets.map(n => `<button type="button" data-days="${n}" aria-pressed="${cur === n}">${n === 7 ? '7일' : n === 30 ? '30일' : n === 90 ? '90일' : n === 180 ? '6개월' : n + '일'}</button>`).join('')}</div>
+    <input type="date" id="p-from" value="${from}" max="${today}" aria-label="시작일"> <span class="muted">~</span> <input type="date" id="p-to" value="${to}" max="${today}" aria-label="종료일"><span class="hint">최대 ${max}일</span></div>`;
+}
+export function bindPeriod(main, page, st, extra = '') {
+  const goTo = (f, t) => go(`#/${page}?from=${f}&to=${t}${extra}`);
+  main.querySelectorAll('[data-period] button').forEach(b => b.onclick = () => goTo(addDays(st.today, -(Number(b.dataset.days) - 1)), st.today));
+  const f = main.querySelector('#p-from'), t = main.querySelector('#p-to');
+  if (f) f.onchange = () => goTo(f.value, t.value);
+  if (t) t.onchange = () => goTo(f.value, t.value);
+}
+/** 페이지 제목 줄 */
+export function pageHead(title, sub = '', right = '') {
+  return `<div class="page-head"><h1>${esc(title)}${sub ? `<span class="sub">${sub}</span>` : ''}</h1>${right}</div>`;
 }
 
 /* ---------- 앱 ---------- */
 export const state = { user: null, status: null, shop: { url: 'https://www.jimifnb0901.com', mallId: 'jimifnb0901' } };
+export const APP_NAME = '지미에프앤비 내부 운영실';
+// 메뉴 아이콘 (선 아이콘, 16px)
+const IC = {
+  home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  orders: '<path d="M3 7h18l-2 12H5z"/><path d="M8 7V5a4 4 0 0 1 8 0v2"/>',
+  cs: '<path d="M4 5h16v11H8l-4 4z"/>',
+  sales: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  stock: '<path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7"/>',
+  customers: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>',
+  fulfillment: '<path d="M2 7h12v10H2zM14 10h4l3 3v4h-7"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
+  products: '<path d="M9 3h6v5l4 11a1.5 1.5 0 0 1-1.4 2H6.4A1.5 1.5 0 0 1 5 19L9 8z"/>',
+  ads: '<path d="M3 11v2a1 1 0 0 0 1 1h3l6 5V5L7 10H4a1 1 0 0 0-1 1z"/><path d="M17 8a5 5 0 0 1 0 8"/>',
+  rules: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
+  log: '<path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="9"/>',
+  settings: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>'
+};
 const PAGES = [
+  { grp: '운영' },
   { id: 'home', label: '홈', mod: home },
   { id: 'orders', label: '주문·출고', mod: orders },
   { id: 'cs', label: 'CS 문의', mod: cs, badge: 'cs' },
-  { id: 'sales', label: '매출·이익', mod: sales },
+  { grp: '분석' },
+  { id: 'sales', label: '매출 분석', mod: sales },
+  { id: 'stock', label: '상품·재고', mod: stock, badge: 'stock' },
+  { id: 'customers', label: '고객 분석', mod: customers },
+  { id: 'fulfillment', label: '출고 운영', mod: fulfillment, badge: 'late' },
+  { grp: '제품·마케팅' },
   { id: 'products', label: '제품·마진', mod: products },
-  { id: 'sep1' },
   { id: 'ads', label: '광고', mod: ads },
   { id: 'rules', label: '자동 규칙', mod: rules },
-  { id: 'sep2' },
+  { grp: '시스템' },
   { id: 'log', label: '변경 이력', mod: log },
   { id: 'settings', label: '설정·연동', mod: settings }
 ];
@@ -147,8 +156,8 @@ function renderShell() {
   if (app.querySelector('.shell')) return;
   app.innerHTML = `<div class="shell">
     <nav class="side" aria-label="메뉴">
-      <div class="brand">지미 운영실<small>(주)지미에프앤비</small></div>
-      <div class="nav" id="nav">${PAGES.map(p => p.label ? `<a href="#/${p.id}" data-page="${p.id}">${p.label}${p.badge ? `<span class="badge" id="badge-${p.badge}" hidden></span>` : ''}</a>` : '<div class="nav-sep"></div>').join('')}</div>
+      <div class="brand"><span class="logo">지</span><span><b>지미에프앤비</b><small>내부 운영실</small></span></div>
+      <div class="nav" id="nav">${PAGES.map(p => p.grp ? `<div class="grp">${p.grp}</div>` : `<a href="#/${p.id}" data-page="${p.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[p.id] || ''}</svg>${p.label}${p.badge ? `<span class="badge" id="badge-${p.badge}" hidden></span>` : ''}</a>`).join('')}</div>
       <div class="side-foot"><a id="shop-link" target="_blank" rel="noopener">자사몰 열기 ↗</a><a id="admin-link" target="_blank" rel="noopener">카페24 관리자 ↗</a><span id="who"></span><button class="btn small" id="logout" type="button">로그아웃</button></div>
     </nav>
     <main class="main" id="main"></main></div>`;
@@ -164,9 +173,9 @@ async function route() {
   document.getElementById('shop-link').href = state.shop.url;
   document.getElementById('admin-link').href = `https://${state.shop.mallId}.cafe24.com/disp/admin/shop1/main/dashboard`;
   const { page, args, query } = parseHash();
-  const p = PAGES.find(x => x.id === page && x.mod) || PAGES[0];
+  const p = PAGES.find(x => x.id === page && x.mod) || PAGES.find(x => x.mod);
   document.querySelectorAll('#nav a').forEach(a => a.setAttribute('aria-current', a.dataset.page === p.id ? 'page' : 'false'));
-  document.title = `${p.label} · 지미 운영실`;
+  document.title = `${p.label} · ${APP_NAME}`;
   if (cleanup) { try { cleanup(); } catch { /* 무시 */ } cleanup = null; }
   const main = document.getElementById('main');
   main.innerHTML = loading();
@@ -176,11 +185,11 @@ async function route() {
 }
 
 function renderLogin(msg, typedName) {
-  document.title = '로그인 · 지미 운영실';
+  document.title = `로그인 · ${APP_NAME}`;
   const app = document.getElementById('app');
   app.innerHTML = `<div class="login"><form id="login-form" autocomplete="on">
-    <div class="brand">지미 운영실</div>
-    <p class="hint" style="margin:0">(주)지미에프앤비 내부 운영 시스템입니다.</p>
+    <div class="brand"><span class="logo">지</span><span><b>지미에프앤비</b><small>내부 운영실</small></span></div>
+    <p class="hint" style="margin:0">관계자만 이용할 수 있습니다.</p>
     <label class="f">이름<input id="login-name" name="name" autocomplete="name" placeholder="김민웅" maxlength="20"></label>
     <label class="f">비밀번호<input id="login-pw" name="password" type="password" autocomplete="current-password" required></label>
     ${msg ? `<div class="err">${esc(msg)}</div>` : ''}
@@ -199,6 +208,23 @@ function renderLogin(msg, typedName) {
 }
 
 window.addEventListener('hashchange', route);
+// 차트·막대에 마우스를 올리면 data-tip 내용을 보여줌
+(() => {
+  const tip = document.getElementById('tip');
+  if (!tip) return;
+  document.addEventListener('mousemove', e => {
+    const t = e.target.closest && e.target.closest('[data-tip]');
+    if (!t) { tip.hidden = true; return; }
+    tip.textContent = t.getAttribute('data-tip');
+    tip.hidden = false;
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    let x = e.clientX + 14, y = e.clientY + 14;
+    if (x + w > innerWidth - 8) x = e.clientX - w - 14;
+    if (y + h > innerHeight - 8) y = e.clientY - h - 14;
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  });
+  document.addEventListener('scroll', () => { tip.hidden = true; }, true);
+})();
 (async () => {
   try {
     const me = await api('/api/me');

@@ -29,7 +29,7 @@ with sync_playwright() as p:
         expect(page.locator(".err")).to_contain_text("비밀번호")
         page.fill("#login-pw", "jimi-local-1234")
         page.click("button[type=submit]")
-        expect(page.locator("h1")).to_have_text("오늘 한눈에")
+        expect(page.locator("h1")).to_contain_text("오늘 한눈에")
         expect(page.locator("#who")).to_have_text("김민웅 님")
         assert page.get_attribute("#shop-link", "href") == "https://www.jimifnb0901.com"
         assert page.get_attribute("#admin-link", "href").startswith("https://jimifnb0901.cafe24.com/")
@@ -43,9 +43,9 @@ with sync_playwright() as p:
 
     def examples():
         page.click("a[data-page=settings]")
-        expect(page.locator("h1")).to_have_text("설정·연동")
+        expect(page.locator("h1")).to_contain_text("설정·연동")
         page.click("#demo-ex")
-        expect(page.locator("h1")).to_have_text("제품·마진")
+        expect(page.locator("h1")).to_contain_text("제품·마진")
         expect(page.locator(".card")).to_have_count(3)
         page.screenshot(path=f"{OUT}/02-products-board.png", full_page=True)
     run(page, "예시 제품 불러오기", examples)
@@ -71,7 +71,7 @@ with sync_playwright() as p:
 
     def orders():
         page.goto(B + "/#/orders?group=ready")
-        expect(page.locator("h1")).to_have_text("주문·출고")
+        expect(page.locator("h1")).to_contain_text("주문·출고")
         n = page.locator("[data-sel]").count()
         assert n > 0
         page.locator("[data-sel]").first.check()
@@ -90,7 +90,7 @@ with sync_playwright() as p:
 
     def cs():
         page.click("a[data-page=cs]")
-        expect(page.locator("h1")).to_have_text("CS 문의")
+        expect(page.locator("h1")).to_contain_text("CS 문의")
         cnt = page.locator(".cs-item").count()
         page.locator(".cs-item").first.click()
         page.fill("#cs-reply", "[확인 필요: 날짜] 출고 예정입니다.")
@@ -107,18 +107,45 @@ with sync_playwright() as p:
 
     def sales():
         page.click("a[data-page=sales]")
-        expect(page.locator("h1")).to_have_text("매출·이익")
-        expect(page.locator("svg.chart")).to_be_visible()
+        expect(page.locator("h1")).to_contain_text("매출 분석")
+        expect(page.locator("svg.chart").first).to_be_visible()
+        expect(page.locator(".heat")).to_be_visible()
+        page.locator("[data-period] button[data-days='7']").click()
+        expect(page.locator("#p-from")).to_have_value(re.compile(r"\d{4}-\d{2}-\d{2}"))
+        page.locator(".hit").first.hover()
+        expect(page.locator("#tip")).to_be_visible()
+        page.screenshot(path=f"{OUT}/06-sales.png", full_page=True)
+    run(page, "매출 분석", sales)
+
+    def stock():
+        page.click("a[data-page=stock]")
+        expect(page.locator("h1")).to_contain_text("상품·재고")
+        page.locator("tr[data-row]").first.click()
+        expect(page.locator(".hbars").first).to_be_visible()
         page.locator("[data-link]").last.click()
         page.select_option("#l-p", index=1)
         page.click("#l-ok")
         expect(page.locator("#toast")).to_contain_text("원가 연결")
-        page.screenshot(path=f"{OUT}/06-sales.png", full_page=True)
-    run(page, "매출·원가 연결", sales)
+    run(page, "상품·재고와 원가 연결", stock)
+
+    def customers():
+        page.click("a[data-page=customers]")
+        expect(page.locator("h1")).to_contain_text("고객 분석")
+        expect(page.locator(".split-bar")).to_be_visible()
+        assert page.locator("table tbody tr").count() > 0
+    run(page, "고객 분석", customers)
+
+    def fulfillment():
+        page.click("a[data-page=fulfillment]")
+        expect(page.locator("h1")).to_contain_text("출고 운영")
+        with page.expect_download() as dl:
+            page.click("#csv-late")
+        assert dl.value.suggested_filename.endswith(".csv")
+    run(page, "출고 운영·CSV", fulfillment)
 
     def ads():
         page.click("a[data-page=ads]")
-        expect(page.locator("h1")).to_have_text("광고")
+        expect(page.locator("h1")).to_contain_text("광고")
         expect(page.locator("tbody tr")).to_have_count(6)
         page.locator("label.switch").first.click()
         page.click("#cb-ok")
@@ -132,7 +159,7 @@ with sync_playwright() as p:
 
     def rules():
         page.click("a[data-page=rules]")
-        expect(page.locator("h1")).to_have_text("자동 규칙")
+        expect(page.locator("h1")).to_contain_text("자동 규칙")
         page.locator("[data-tpl]").nth(1).click()
         page.click("#e-preview")
         expect(page.locator("#e-prev")).to_contain_text("캠페인")
@@ -148,7 +175,7 @@ with sync_playwright() as p:
 
     def logpage():
         page.click("a[data-page=log]")
-        expect(page.locator("h1")).to_have_text("변경 이력")
+        expect(page.locator("h1")).to_contain_text("변경 이력")
         text = page.locator("table").inner_text()
         for k in ["송장 등록", "CS 답변", "광고 끄기", "예산 변경", "규칙 추가"]:
             assert k in text, k

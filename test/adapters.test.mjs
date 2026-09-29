@@ -56,11 +56,11 @@ test('카페24: 인증 코드 교환, 토큰 저장, 만료 전 갱신', async (
 });
 
 test('카페24: 주문 페이지 넘김·변환, 게시판 답변 여부, 송장 등록 형식', async () => {
-  const mk = i => ({ order_id: `20260929-${String(i).padStart(7, '0')}`, payment_date: '2026-09-29T10:00:00+09:00', payment_amount: '34900.00', canceled: 'F', buyer_name: '김민웅', order_status: 'N20',
+  const mk = i => ({ order_id: `20260929-${String(i).padStart(7, '0')}`, payment_date: '2026-09-29T10:00:00+09:00', payment_amount: '34900.00', canceled: 'F', buyer_name: '김민웅', order_status: 'N20', payment_method_name: ['카드'], order_place_name: '모바일 웹', first_order: i === 0 ? 'T' : 'F', member_id: 'user' + (i % 3), receivers: [{ address1: '서울특별시 강남구 테헤란로 1' }],
     items: [{ order_item_code: `it${i}`, product_no: 101, product_name: '불고기', quantity: 1, product_price: '34900.00', order_status: 'N20' }] });
   on('/admin/orders?', url => {
     const q = new URL(url).searchParams;
-    assert.equal(q.get('date_type'), 'pay_date'); assert.equal(q.get('embed'), 'items');
+    assert.equal(q.get('date_type'), 'pay_date'); assert.equal(q.get('embed'), 'items,receivers,cancellation,return');
     const off = Number(q.get('offset'));
     return { orders: off === 0 ? Array.from({ length: 100 }, (_, i) => mk(i)) : [mk(100), mk(101)] };
   });
@@ -68,6 +68,8 @@ test('카페24: 주문 페이지 넘김·변환, 게시판 답변 여부, 송장
   assert.equal(orders.length, 102);
   assert.deepEqual({ id: orders[0].id, date: orders[0].date, amount: orders[0].amount, buyer: orders[0].buyer, status: orders[0].status, qty: orders[0].items[0].qty },
     { id: '20260929-0000000', date: '2026-09-29', amount: 34900, buyer: '김*웅', status: 'N20', qty: 1 });
+  assert.deepEqual([orders[0].payment, orders[0].channel, orders[0].firstOrder, orders[0].region], ['카드', '모바일 웹', true, '서울']);
+  assert.equal(orders[0].member, orders[3].member, '같은 회원은 같은 값'); assert.notEqual(orders[0].member, 'user0', '회원 아이디 원문은 저장 안 함');
   const lastCall = calls.filter(c => c.url.includes('/admin/orders?')).at(-1);
   assert.equal(lastCall.opt.headers['X-Cafe24-Api-Version'], '2026-09-01');
   assert.match(lastCall.opt.headers.Authorization, /^Bearer at/);

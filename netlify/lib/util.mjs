@@ -1,4 +1,5 @@
 // 공통 도구: 날짜(한국시간), 응답, 외부 API 호출
+import crypto from 'node:crypto';
 export const KST_OFFSET = 9 * 3600 * 1000;
 
 /** 한국시간 기준 YYYY-MM-DD */
@@ -57,6 +58,22 @@ export function maskName(name) {
   if (s.length <= 1) return s;
   if (s.length === 2) return s[0] + '*';
   return s[0] + '*'.repeat(s.length - 2) + s[s.length - 1];
+}
+
+const REGIONS = [['서울', '서울'], ['부산', '부산'], ['대구', '대구'], ['인천', '인천'], ['광주', '광주'], ['대전', '대전'], ['울산', '울산'], ['세종', '세종'],
+  ['경기', '경기'], ['강원', '강원'], ['충북', '충북'], ['충청북', '충북'], ['충남', '충남'], ['충청남', '충남'], ['전북', '전북'], ['전라북', '전북'],
+  ['전남', '전남'], ['전라남', '전남'], ['경북', '경북'], ['경상북', '경북'], ['경남', '경남'], ['경상남', '경남'], ['제주', '제주']];
+/** 주소 첫 단어로 시·도 구분 (예: "서울특별시 강남구…" → 서울) */
+export function regionOf(addr) {
+  const first = String(addr || '').trim().split(/\s+/)[0] || '';
+  if (!first) return '미상';
+  // 전남광주통합특별시처럼 새 행정구역명은 가장 먼저 맞는 이름으로
+  for (const [k, v] of REGIONS) if (first.startsWith(k)) return v;
+  return '기타';
+}
+/** 회원 아이디는 저장하지 않고 되돌릴 수 없는 짧은 값으로 바꿔 재구매 계산에만 사용 */
+export function memberKey(id) {
+  return crypto.createHmac('sha256', process.env.SESSION_SECRET || 'jimi').update(String(id)).digest('base64url').slice(0, 16);
 }
 
 export function newId(prefix = 'x') {

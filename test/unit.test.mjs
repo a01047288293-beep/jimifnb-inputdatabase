@@ -91,3 +91,50 @@ test('캠페인 요약: 기간 합계·판정', () => {
   assert.equal(a.verdict, 3 >= calc(P).beRoas * 1.2 ? 'good' : 3 >= calc(P).beRoas ? 'warn' : 'bad');
   assert.ok(list.find(x => x.key === 'google:9'), '목록에 없는 캠페인도 표시');
 });
+
+import { salesInsights, productInsights, customerInsights, fulfillmentInsights, kstParts, summary } from '../netlify/lib/insights.mjs';
+import { regionOf } from '../netlify/lib/util.mjs';
+const O = (id, date, hh, amount, extra = {}) => ({ id, date, time: `${date}T${hh}:00:00+09:00`, status: 'N40', amount, canceled: false, payment: '카드', channel: '모바일 웹', member: null, region: '서울', firstOrder: null, items: [{ productNo: 1, name: 'A', option: '1팩', qty: 1, price: amount, shippedAt: null, deliveredAt: null }], ...extra });
+
+test('운영 분석: 매출·요일·시간·비교', () => {
+  const days = ['2026-09-28', '2026-09-29'];
+  const cur = [O('a', '2026-09-28', '10', 10000), O('b', '2026-09-29', '21', 30000, { payment: '네이버페이' }), O('c', '2026-09-29', '21', 5000, { canceled: true, status: 'C40' })];
+  const s = salesInsights(cur, [O('p', '2026-09-26', '09', 20000)], null, days);
+  assert.equal(s.summary.revenue, 40000); assert.equal(s.summary.orders, 2); assert.equal(s.canceled, 1);
+  assert.equal(s.prev.revenue, 20000); assert.equal(s.lastYear, null);
+  assert.equal(s.hours[21].orders, 1); assert.equal(s.heat[1][10], 1, '9/28은 월요일');
+  assert.equal(s.weekday[2].avgRevenue, 30000);
+  assert.deepEqual(s.payments.map(p => p.name), ['네이버페이', '카드']);
+  assert.deepEqual(kstParts({ time: '2026-09-29T12:30:00Z', date: '2026-09-29' }), [2, 21]);
+  assert.equal(summary([]).aov, null);
+  assert.equal(regionOf('전남광주통합특별시 남구 봉선로 21'), '전남'); assert.equal(regionOf('경상남도 창원시'), '경남'); assert.equal(regionOf(''), '미상');
+});
+test('운영 분석: 상품 순위·재고 경고', () => {
+  const days = Array.from({ length: 14 }, (_, i) => `2026-09-${String(16 + i).padStart(2, '0')}`);
+  const cur = days.map((d, i) => O('o' + i, d, '10', 20000, { items: [{ productNo: 1, name: 'A', option: '1팩', qty: 2, price: 10000 }] }));
+  cur.push(O('x', days[0], '11', 5000, { items: [{ productNo: 2, name: 'B', option: '', qty: 1, price: 5000 }] }));
+  const inv = [{ productNo: 1, name: 'A', option: '1팩', quantity: 10, safety: 3, tracked: true, soldOut: false }, { productNo: 2, name: 'B', option: '', quantity: 0, safety: 0, tracked: true, soldOut: true }, { productNo: 3, name: 'C', option: '', quantity: 50, safety: 5, tracked: true, soldOut: false }];
+  const r = productInsights(cur, [O('p', '2026-09-01', '10', 1000, { items: [{ productNo: 2, name: 'B', qty: 1, price: 1000 }] })], inv, days, new Map());
+  assert.equal(r.products[0].productNo, 1); assert.equal(r.products[0].prevRank, null); assert.equal(r.products[1].prevRank, 1);
+  const a = r.stock.find(s => s.productNo === 1); assert.equal(a.perDay, 2); assert.equal(a.cover, 5); assert.equal(a.level, 'warn');
+  assert.equal(r.stock[0].productNo, 2); assert.equal(r.stock[0].level, 'critical', '팔리던 품목 품절');
+  assert.equal(r.stock.find(s => s.productNo === 3).level, 'ok'); assert.equal(r.alerts, 2);
+});
+test('운영 분석: 고객 신규·재구매', () => {
+  const hist = [O('h1', '2026-05-01', '10', 1000, { member: 'm1' }), O('h2', '2026-09-20', '10', 2000, { member: 'm1' }), O('h3', '2026-09-21', '10', 3000, { member: 'm2' }), O('h4', '2026-09-22', '10', 4000)];
+  const r = customerInsights(hist.slice(1), hist, '2026-09-01');
+  assert.equal(r.members, 2); assert.equal(r.returningOrders, 1); assert.equal(r.newOrders, 1); assert.equal(r.guestOrders, 1);
+  assert.equal(r.repeatRate, 0.5); assert.equal(r.medianGap, 142); assert.equal(r.top[0].orders, 2);
+});
+test('운영 분석: 출고 소요·지연·클레임', () => {
+  const now = Date.parse('2026-09-29T12:00:00+09:00');
+  const shipped = O('s', '2026-09-27', '10', 1000, { items: [{ productNo: 1, name: 'A', qty: 1, price: 1000, shippedAt: '2026-09-28T10:00:00+09:00', deliveredAt: '2026-09-29T10:00:00+09:00' }] });
+  const late = O('l', '2026-09-26', '10', 1000, { status: 'N20' });
+  const fresh = O('f', '2026-09-29', '10', 1000, { status: 'N20' });
+  const ret = O('r', '2026-09-20', '10', 1000, { status: 'R40', claimReason: '포장 파손' });
+  const f = fulfillmentInsights([shipped, late, fresh, ret], { now, slaHours: 48, days: ['2026-09-27'] });
+  assert.equal(f.leadMedian, 24); assert.equal(f.deliverMedian, 24); assert.equal(f.within24, 1);
+  assert.deepEqual(f.delayed.map(o => o.id), ['l']);
+  assert.equal(f.claims.find(c => c.type === 'R').count, 1); assert.equal(f.reasons[0].name, '포장 파손');
+  assert.equal(f.dailyLead[0].median, 24);
+});

@@ -45,6 +45,7 @@ export async function render(main, { query }) {
         <label class="f">자동 규칙 하루 최대 실행(회)<input type="number" id="st-max" min="0" step="1" value="${st.maxActionsPerDay}"></label>
         <label class="f">최소 일 예산(원)<input type="number" id="st-minb" min="0" step="1000" value="${st.minBudget}"></label>
         <label class="f">예산 한 번 변경 한도(%)<input type="number" id="st-maxpct" min="1" max="100" value="${st.maxBudgetChangePct}"></label>
+        <label class="f">출고 지연 기준(시간)<input type="number" id="st-sla" min="1" step="1" value="${st.shipSlaHours ?? 48}"></label>
         <label class="f">자동 규칙 실행 방식<select id="st-dry"><option value="1" ${st.rulesDryRun ? 'selected' : ''}>모의 실행 (기록만)</option><option value="0" ${!st.rulesDryRun ? 'selected' : ''}>실제 실행</option></select></label>
       </div>
       <div><button class="btn primary" id="st-save">설정 저장</button></div>
@@ -64,7 +65,7 @@ export async function render(main, { query }) {
       await api('/api/settings', { method: 'PUT', body: {
         csWriter: main.querySelector('#st-writer').value, maxActionsPerDay: Number(main.querySelector('#st-max').value),
         minBudget: Number(main.querySelector('#st-minb').value), maxBudgetChangePct: Number(main.querySelector('#st-maxpct').value),
-        rulesDryRun: main.querySelector('#st-dry').value === '1'
+        rulesDryRun: main.querySelector('#st-dry').value === '1', shipSlaHours: Number(main.querySelector('#st-sla').value)
       } });
       toast('설정을 저장했습니다.');
     } catch (e) { toast(e.message, true); }

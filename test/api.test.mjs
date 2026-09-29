@@ -131,6 +131,22 @@ test('자동 규칙: 저장·미리보기·모의 실행·실제 실행·대기 
   assert.equal((await call('GET', '/api/rules')).json.rules.length, 0);
 });
 
+test('운영 분석 API (데모)', async () => {
+  const sales = await call('GET', '/api/insights/sales?from=2026-09-01&to=2026-09-29');
+  assert.equal(sales.status, 200); assert.equal(sales.json.daily.length, 29); assert.equal(sales.json.prevDaily.length, 29);
+  assert.equal(sales.json.heat.length, 7); assert.ok(sales.json.payments.length > 0); assert.equal(sales.json.profit.length, 29);
+  assert.equal((await call('GET', '/api/insights/sales?from=2025-01-01&to=2026-09-29')).status, 400, '184일 초과 거부');
+  const prod = await call('GET', '/api/insights/products?from=2026-09-01&to=2026-09-29');
+  assert.equal(prod.status, 200); assert.ok(prod.json.products[0].spark.length === 29); assert.ok(prod.json.stock.length > 0);
+  const cust = await call('GET', '/api/insights/customers');
+  assert.equal(cust.status, 200); assert.ok(cust.json.members > 0); assert.equal(cust.json.coverage.have, 365);
+  const ful = await call('GET', '/api/insights/fulfillment');
+  assert.equal(ful.status, 200); assert.ok(ful.json.leadMedian > 0); assert.ok(Array.isArray(ful.json.delayed));
+  const home = await call('GET', '/api/home');
+  for (const k of ['delayed', 'stockAlerts', 'badAds', 'mtd', 'prevMtd', 'topProducts', 'ySame']) assert.ok(k in home.json, k);
+  assert.equal((await call('PUT', '/api/settings', { shipSlaHours: 24 })).json.shipSlaHours, 24);
+});
+
 test('설정 검증과 수동 수집', async () => {
   assert.equal((await call('PUT', '/api/settings', { minBudget: -5 })).status, 400);
   const st = await call('PUT', '/api/settings', { csWriter: '지미에프앤비 CS', maxBudgetChangePct: 300 });
