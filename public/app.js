@@ -1,4 +1,4 @@
-// 지미에프앤비 내부 운영실 — 화면 뼈대: 로그인, 메뉴, 주소별 화면 전환, 공통 도구
+// 지미온(JIMION) — 지미에프앤비 운영실 화면 뼈대: 로그인, 메뉴, 주소별 화면 전환, 공통 도구
 import * as home from './pages/home.js';
 import * as orders from './pages/orders.js';
 import * as cs from './pages/cs.js';
@@ -140,7 +140,8 @@ export function pageHead(title, sub = '', right = '') {
 
 /* ---------- 앱 ---------- */
 export const state = { user: null, status: null, shop: { url: 'https://www.jimifnb0901.com', mallId: 'jimifnb0901' } };
-export const APP_NAME = '지미에프앤비 내부 운영실';
+export const APP_NAME = '지미온';
+export const APP_SUB = '지미에프앤비 운영실';
 // 메뉴 아이콘 (선 아이콘, 16px)
 const IC = {
   home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
@@ -202,7 +203,7 @@ function renderShell() {
   if (app.querySelector('.shell')) return;
   app.innerHTML = `<div class="shell">
     <nav class="side" aria-label="메뉴">
-      <div class="brand"><span class="logo">지</span><span><b>지미에프앤비</b><small>내부 운영실</small></span></div>
+      <div class="brand"><svg class="logo" viewBox="0 0 120 120" aria-hidden="true"><rect width="120" height="120" rx="28" fill="#3987e5"/><path d="M40 40a30 30 0 1 0 40 0" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round"/><path d="M60 22v34" stroke="#fff" stroke-width="10" stroke-linecap="round"/><circle cx="60" cy="22" r="7" fill="#fff"/></svg><span><b class="wordmark">지미온</b><small>지미에프앤비 운영실</small></span></div>
       <div class="nav" id="nav">${PAGES.map(p => p.grp ? `<div class="grp">${p.grp}</div>` : `<a href="#/${p.id}" data-page="${p.id}" class="${p.sub ? 'sub' : ''}">${p.sub ? '' : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[p.icon || p.id] || ''}</svg>`}${p.label}${p.badge ? `<span class="badge" id="badge-${p.badge}" hidden></span>` : ''}</a>`).join('')}</div>
       <div class="side-foot"><a id="shop-link" target="_blank" rel="noopener">자사몰 열기 ↗</a><a id="admin-link" target="_blank" rel="noopener">카페24 관리자 ↗</a><span id="who"></span><button class="btn small" id="logout" type="button">로그아웃</button></div>
     </nav>
@@ -236,8 +237,8 @@ function renderLogin(msg, typedName) {
   document.title = `로그인 · ${APP_NAME}`;
   const app = document.getElementById('app');
   app.innerHTML = `<div class="login"><form id="login-form" autocomplete="on">
-    <div class="brand"><span class="logo">지</span><span><b>지미에프앤비</b><small>내부 운영실</small></span></div>
-    <p class="hint" style="margin:0">관계자만 이용할 수 있습니다.</p>
+    <div class="brand"><svg class="logo" viewBox="0 0 120 120" aria-hidden="true"><rect width="120" height="120" rx="28" fill="#3987e5"/><path d="M40 40a30 30 0 1 0 40 0" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round"/><path d="M60 22v34" stroke="#fff" stroke-width="10" stroke-linecap="round"/><circle cx="60" cy="22" r="7" fill="#fff"/></svg><span><b class="wordmark">지미온</b><small>지미에프앤비 운영실 · 관계자 전용</small></span></div>
+    <p class="hint" style="margin:0">지미는 늘 켜져 있습니다.</p>
     <label class="f">이름<input id="login-name" name="name" autocomplete="name" placeholder="김민웅" maxlength="20"></label>
     <label class="f">비밀번호<input id="login-pw" name="password" type="password" autocomplete="current-password" required></label>
     ${msg ? `<div class="err">${esc(msg)}</div>` : ''}

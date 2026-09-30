@@ -30,7 +30,7 @@ with sync_playwright() as p:
         page.fill("#login-pw", "jimi-local-1234")
         page.click("button[type=submit]")
         expect(page.locator("h1")).to_contain_text("오늘 한눈에")
-        expect(page.locator("#who")).to_have_text("김민웅 님")
+        expect(page.locator("#who")).to_have_text("김민웅 님"); expect(page.locator(".brand .wordmark").first).to_have_text("지미온")
         assert page.get_attribute("#shop-link", "href") == "https://www.jimifnb0901.com"
         assert page.get_attribute("#admin-link", "href").startswith("https://jimifnb0901.cafe24.com/")
     run(page, "로그인", login)
