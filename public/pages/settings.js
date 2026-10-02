@@ -56,6 +56,8 @@ export async function render(main, { query }) {
         <label class="f">예산 한 번 변경 한도(%)<input type="number" id="st-maxpct" min="1" max="100" value="${st.maxBudgetChangePct}"></label>
         <label class="f">출고 지연 기준(시간)<input type="number" id="st-sla" min="1" step="1" value="${st.shipSlaHours ?? 48}"></label>
         <label class="f">자동 규칙 실행 방식<select id="st-dry"><option value="1" ${st.rulesDryRun ? 'selected' : ''}>모의 실행 (기록만)</option><option value="0" ${!st.rulesDryRun ? 'selected' : ''}>실제 실행</option></select></label>
+        <label class="f">새 캠페인 제품 자동 연결<select id="st-al"><option value="1" ${st.autoLink?.enabled !== false ? 'selected' : ''}>켬 (15분마다 새 캠페인을 제품에 연결)</option><option value="0" ${st.autoLink?.enabled === false ? 'selected' : ''}>끔 (광고 관리에서 직접 연결)</option></select></label>
+        <label class="f">자동 연결 기본 제품<select id="st-aldef"><option value="">없음 (링크·키워드로만 찾기)</option>${(s.products || []).map(p => `<option value="${esc(p.id)}" ${p.id === st.autoLink?.defaultProductId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select><span class="hint">광고 링크 상품번호 → 캠페인 이름 키워드 → 기본 제품 순서로 찾습니다</span></label>
       </div>
       <div><button class="btn primary" id="st-save">설정 저장</button></div>
     </section>
@@ -82,7 +84,8 @@ export async function render(main, { query }) {
       await api('/api/settings', { method: 'PUT', body: {
         csWriter: main.querySelector('#st-writer').value, maxActionsPerDay: Number(main.querySelector('#st-max').value),
         minBudget: Number(main.querySelector('#st-minb').value), maxBudgetChangePct: Number(main.querySelector('#st-maxpct').value),
-        rulesDryRun: main.querySelector('#st-dry').value === '1', shipSlaHours: Number(main.querySelector('#st-sla').value)
+        rulesDryRun: main.querySelector('#st-dry').value === '1', shipSlaHours: Number(main.querySelector('#st-sla').value),
+        autoLink: { enabled: main.querySelector('#st-al').value === '1', defaultProductId: main.querySelector('#st-aldef').value || null }
       } });
       toast('설정을 저장했습니다.');
     } catch (e) { toast(e.message, true); }

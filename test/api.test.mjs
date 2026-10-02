@@ -10,6 +10,8 @@ process.env.ADMIN_PASSWORD = 'test-password-1';
 process.env.SESSION_SECRET = 'test-secret-0123456789';
 for (const k of Object.keys(process.env)) if (/^(CAFE24|META|GOOGLE_ADS|TIKTOK|ANTHROPIC)_/.test(k)) delete process.env[k];
 const { default: api } = await import('../netlify/functions/api.mjs');
+const { kstDate, addDays } = await import('../netlify/lib/util.mjs');
+const TODAY = kstDate();
 
 let cookie = '';
 async function call(method, p, body, { auth = true, csrf = true, ip = '1.1.1.1' } = {}) {
@@ -148,8 +150,9 @@ test('운영 분석 API (데모)', async () => {
 });
 
 test('주문관리: 주문일·결제일 기준, 상세, 매출 대조', async () => {
-  const byOrder = await call('GET', '/api/orders?from=2026-09-20&to=2026-09-29&basis=order');
-  const byPay = await call('GET', '/api/orders?from=2026-09-20&to=2026-09-29&basis=pay');
+  // 데모 주문은 오늘 기준으로 만들어지므로(입금전은 최근 2일) 날짜도 오늘 기준
+  const byOrder = await call('GET', `/api/orders?from=${addDays(TODAY, -9)}&to=${TODAY}&basis=order`);
+  const byPay = await call('GET', `/api/orders?from=${addDays(TODAY, -9)}&to=${TODAY}&basis=pay`);
   assert.equal(byOrder.json.basis, 'order');
   assert.ok(byOrder.json.orders.some(o => o.status === 'N00'), '주문일 기준에는 입금전 포함');
   assert.ok(!byPay.json.orders.some(o => o.paid === false), '결제일 기준에는 입금전 없음');
@@ -157,12 +160,12 @@ test('주문관리: 주문일·결제일 기준, 상세, 매출 대조', async (
   const det = await call('GET', '/api/orders/' + one.id);
   assert.equal(det.status, 200); assert.equal(det.json.id, one.id); assert.ok(det.json.receiver.address); assert.ok(det.json.items[0].statusLabel);
   assert.equal((await call('GET', '/api/orders/20260929-999999x')).status, 404);
-  const rec = await call('GET', '/api/reconcile?from=2026-09-20&to=2026-09-29');
+  const rec = await call('GET', `/api/reconcile?from=${addDays(TODAY, -9)}&to=${TODAY}`);
   assert.equal(rec.status, 200); assert.equal(rec.json.rows.length, 10);
   const T = rec.json.total;
   assert.ok(T.orderCount >= T.payCount); assert.ok(T.orderAmount > T.ours); assert.ok(T.discount > 0); assert.ok(T.unpaidCount > 0);
   assert.equal(T.ours, rec.json.rows.reduce((s, r) => s + r.ours, 0));
-  assert.equal((await call('GET', '/api/reconcile?from=2026-08-01&to=2026-09-29')).status, 400, '31일 초과 거부');
+  assert.equal((await call('GET', `/api/reconcile?from=${addDays(TODAY, -59)}&to=${TODAY}`)).status, 400, '31일 초과 거부');
 });
 
 test('설정 검증과 수동 수집', async () => {
@@ -207,10 +210,10 @@ test('주문관리: 상태별 건수는 기간과 무관, 환불·결제 대조'
 });
 
 test('광고 분석 API (데모): 개요·캠페인·소재·퍼널·제품 손익·코멘트', async () => {
-  const r = await call('GET', '/api/ads/analysis?from=2026-09-16&to=2026-09-29');
+  const r = await call('GET', `/api/ads/analysis?from=${addDays(TODAY, -14)}&to=${addDays(TODAY, -1)}`);
   assert.equal(r.status, 200);
   const d = r.json;
-  assert.equal(d.ov.daily.length, 14); assert.equal(d.prevTo, '2026-09-15');
+  assert.equal(d.ov.daily.length, 14); assert.equal(d.prevTo, addDays(TODAY, -15));
   assert.ok(Math.abs(d.ov.total.spend - d.ov.byPlatform.reduce((s, p) => s + p.spend, 0)) < 1);
   assert.ok(d.camps.length >= 5 && d.camps.every(c => Array.isArray(c.comments)));
   assert.ok(d.creatives.list.length >= 8 && d.creatives.formats.length >= 2);
@@ -240,4 +243,40 @@ test('광고 매체 분석 포함 on/off', async () => {
   assert.equal(st.json.modes.tiktok, 'off'); assert.equal(st.json.modes.platforms.tiktok.canInclude, true);
   await call('PUT', '/api/settings', { adPlatforms: { tiktok: true } });
   assert.ok((await call('GET', '/api/ads/analysis?from=2026-09-16&to=2026-09-29')).json.ov.byPlatform.some(p => p.platform === 'tiktok'));
+});
+
+test('캠페인 → 제품 자동 연결 (데모): 링크·키워드·기본 제품, 수집 단계 포함', async () => {
+  // 예시 제품이 이미 있을 수 있으니 모든 연결을 풀고 시작
+  const ads0 = (await call('GET', '/api/ads?from=2026-09-01&to=2026-09-07')).json;
+  for (const c of ads0.campaigns.filter(c => c.productId)) await call('POST', '/api/ads/link', { platform: c.platform, id: c.id, productId: null });
+  const products = (await call('GET', '/api/products')).json;
+  assert.ok(products.length >= 2, '예시 제품 필요');
+  const pre = (await call('GET', '/api/ads/autolink')).json;
+  assert.ok(pre.plan.some(p => p.how === 'url'), '데모 광고 링크의 상품번호로 찾음');
+  assert.ok(pre.unresolved.some(p => p.name.includes('P-MAX')), '전체상품 캠페인은 기본 제품 없으면 미해결');
+  // 기본 제품 지정 → 전부 연결
+  const def = products[0].id;
+  assert.equal((await call('PUT', '/api/settings', { autoLink: { defaultProductId: def } })).status, 200);
+  assert.equal((await call('PUT', '/api/settings', { autoLink: { defaultProductId: 'no-such' } })).status, 400);
+  const run = (await call('POST', '/api/ads/autolink')).json;
+  assert.ok(run.applied.length >= pre.plan.length, '계획한 만큼 연결');
+  assert.equal(run.unresolved.length, 0);
+  const ads = (await call('GET', '/api/ads?from=2026-09-01&to=2026-09-07')).json;
+  assert.equal(ads.campaigns.filter(c => !c.productId).length, 0, '미연결 캠페인 없음');
+  assert.ok(ads.campaigns.some(c => c.linkHow === 'url') && ads.campaigns.some(c => c.linkHow === 'default'));
+  // 직접 바꾸면 manual, 다시 자동 연결은 이미 연결된 것을 건드리지 않음
+  const c0 = ads.campaigns[0];
+  await call('POST', '/api/ads/link', { platform: c0.platform, id: c0.id, productId: products[1].id });
+  const again = (await call('POST', '/api/ads/autolink')).json;
+  assert.equal(again.applied.length, 0);
+  assert.equal((await call('GET', '/api/ads?from=2026-09-01&to=2026-09-07')).json.campaigns.find(c => c.key === c0.key).linkHow, 'manual');
+  // 자동 수집에 단계가 들어감 / 끄면 건너뜀
+  const sync = (await call('POST', '/api/sync')).json;
+  assert.ok(sync.steps.some(s => s.name === '제품 자동 연결' && s.ok));
+  await call('PUT', '/api/settings', { autoLink: { enabled: false } });
+  const sync2 = (await call('POST', '/api/sync')).json;
+  assert.match(sync2.steps.find(s => s.name === '제품 자동 연결').note, /꺼져/);
+  await call('PUT', '/api/settings', { autoLink: { enabled: true } });
+  const logs = (await call('GET', '/api/log?limit=50')).json;
+  assert.ok(JSON.stringify(logs).includes('광고 연결'), '연결 기록 남음');
 });

@@ -89,6 +89,7 @@ function renderDetail(main, p) {
       </section>
       <section class="box"><div class="box-h"><h2>카페24 상품 연결</h2><span class="hint">연결한 상품의 판매에 이 원가를 씁니다</span></div>
         <div id="map-area"><button class="btn" id="load-shop">카페24 상품 목록 불러오기</button> <span class="hint">연결된 상품번호: ${p.cafe24ProductNos.length ? p.cafe24ProductNos.map(n => '#' + esc(n)).join(', ') : '없음'}</span></div>
+        <div class="fields" style="margin-top:10px"><label class="f wide">광고 키워드 <span class="hint">캠페인 이름에 이 말이 있으면 자동으로 이 제품에 연결 (쉼표로 구분, 제품명은 자동 포함)</span><input id="f-adKeywords" data-k="adKeywords" data-t="text" value="${esc(p.adKeywords || '')}" placeholder="예: 불고기, 양념육, BG"></label></div>
       </section>
       <section class="box"><div class="box-h"><h2>배합 (배치 1회)</h2><span class="hint">단가는 VAT 별도, 단위당 금액</span></div>
         ${rowsTable('ingredients', [{ f: 'name', label: '원재료', type: 'text' }, { f: 'unit', label: '단위', type: 'select', opts: UNITS }, { f: 'unitPrice', label: '단가(원)', type: 'number' }, { f: 'qty', label: '투입량', type: 'number' }], { label: '금액', foot: true })}

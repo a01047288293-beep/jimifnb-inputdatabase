@@ -127,6 +127,19 @@ export async function googleAdCreatives() {
   }]));
 }
 
+/** 캠페인별 광고 최종 주소 (제품 자동 연결용): {campaignId: [url]} */
+export async function googleCampaignUrls() {
+  const out = {};
+  const add = (cid, urls) => { if (!cid) return; const acc = new Set(out[cid] || []); for (const u of urls || []) acc.add(u); out[cid] = [...acc].slice(0, 40); };
+  const rows = await search("SELECT campaign.id, ad_group_ad.ad.final_urls FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'");
+  for (const r of rows) add(String(r.campaign?.id || ''), r.adGroupAd?.ad?.finalUrls);
+  try { // 실적 최대화(PMax) 캠페인은 애셋 그룹에 주소가 있음
+    const ag = await search("SELECT campaign.id, asset_group.final_urls FROM asset_group WHERE asset_group.status != 'REMOVED'");
+    for (const r of ag) add(String(r.campaign?.id || ''), r.assetGroup?.finalUrls);
+  } catch { /* 계정에 PMax가 없거나 권한 부족이면 넘어감 */ }
+  return out;
+}
+
 export async function googleSetStatus(id, on) {
   const body = { operations: [{ updateMask: 'status', update: { resourceName: `customers/${env().cid}/campaigns/${id}`, status: on ? 'ENABLED' : 'PAUSED' } }] };
   return httpJson(url('campaigns:mutate'), { method: 'POST', label: '구글', headers: await headers(), body: JSON.stringify(body) });

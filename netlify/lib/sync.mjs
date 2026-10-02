@@ -4,6 +4,7 @@ import { kstDate, addDays } from './util.mjs';
 import * as data from './data.mjs';
 import * as C from './cafe24.mjs';
 import { runRules } from './rules.mjs';
+import { runAutoLink } from './autolink.mjs';
 
 export async function runSync(trigger = 'schedule') {
   const started = Date.now();
@@ -33,6 +34,12 @@ export async function runSync(trigger = 'schedule') {
       return `캠페인 ${ads.campaigns.length}개`;
     })
   ]);
+  // 새로 올라온 캠페인은 규칙·손익 판정 전에 제품에 먼저 연결
+  await step('제품 자동 연결', async () => {
+    const r = await runAutoLink({ who: '자동 연결' });
+    if (r.skipped) return r.skipped;
+    return `${r.applied.length}개 연결${r.unresolved.length ? `, 미해결 ${r.unresolved.length}개` : ''}`;
+  });
   await step('자동 규칙', async () => {
     const r = await runRules({ who: '자동 규칙' });
     for (const e of r.errors) res.errors.push(e);

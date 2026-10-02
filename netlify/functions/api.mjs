@@ -5,6 +5,7 @@ import * as data from '../lib/data.mjs';
 import * as C from '../lib/cafe24.mjs';
 import * as G from '../lib/google.mjs';
 import * as R from '../lib/rules.mjs';
+import * as AL from '../lib/autolink.mjs';
 import * as A from '../lib/analytics.mjs';
 import * as I from '../lib/insights.mjs';
 import { runSync } from '../lib/sync.mjs';
@@ -50,9 +51,9 @@ route('GET', '/api/me', async (req) => {
 
 /* ---------- 상태·설정 ---------- */
 route('GET', '/api/status', async () => {
-  const [modes, settings, sync, cafe24Token, cafe24Connect, googleConnect] = await Promise.all([data.modes(), data.getSettings(), getJSON('status/sync'), C.tokenInfo(), getJSON('status/cafe24-connect'), getJSON('status/google-connect')]);
+  const [modes, settings, sync, cafe24Token, cafe24Connect, googleConnect, products] = await Promise.all([data.modes(), data.getSettings(), getJSON('status/sync'), C.tokenInfo(), getJSON('status/cafe24-connect'), getJSON('status/google-connect'), data.listProducts()]);
   return json({
-    modes, settings, sync, cafe24Token, cafe24Connect, cafe24RedirectUri: process.env.CAFE24_REDIRECT_URI || null, googleConnect, googleRedirectUri: process.env.GOOGLE_ADS_REDIRECT_URI || null,
+    modes, settings, sync, products: products.map(p => ({ id: p.id, name: p.name })), cafe24Token, cafe24Connect, cafe24RedirectUri: process.env.CAFE24_REDIRECT_URI || null, googleConnect, googleRedirectUri: process.env.GOOGLE_ADS_REDIRECT_URI || null,
     ai: aiConfigured(), today: kstDate(), shop: { url: C.SHOP_URL(), mallId: C.MALL_ID() }
   });
 });
@@ -302,8 +303,14 @@ route('POST', '/api/products/examples', async (req, s) => {
 route('GET', '/api/ads', async (req, s, url) => {
   const { from, to } = range(url, 92, 7);
   const [ads, settings, products] = await Promise.all([data.allAds(from, to), data.getSettings(), data.listProducts()]);
-  const list = A.campaignSummary(ads.campaigns, ads.rows, settings.campaignLinks || {}, products);
-  return json({ from, to, campaigns: list, errors: ads.errors, modes: ads.modes, platformStates: await data.platformStates(), products: products.map(p => ({ id: p.id, name: p.name, beRoas: calc(p).beRoas })) });
+  const list = A.campaignSummary(ads.campaigns, ads.rows, settings.campaignLinks || {}, products, settings.campaignLinkSrc || {});
+  return json({ from, to, campaigns: list, errors: ads.errors, modes: ads.modes, platformStates: await data.platformStates(), autoLink: settings.autoLink || {}, products: products.map(p => ({ id: p.id, name: p.name, beRoas: calc(p).beRoas })) });
+});
+/** 제품 자동 연결: 미리보기(GET) / 적용(POST). 광고 링크 상품번호 → 이름 키워드 → 기본 제품 */
+route('GET', '/api/ads/autolink', async () => json(await AL.previewAutoLink()));
+route('POST', '/api/ads/autolink', async (req, s) => {
+  const r = await AL.runAutoLink({ who: who(s), force: true });
+  return json({ ...r, howLabel: AL.HOW_LABEL });
 });
 /** 광고 분석: 개요·캠페인·소재·퍼널·제품 손익 + 코멘트 */
 route('GET', '/api/ads/analysis', async (req, s, url) => {

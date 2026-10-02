@@ -183,6 +183,24 @@ with sync_playwright() as p:
         page.screenshot(path=f"{OUT}/07-ads.png", full_page=True)
     run(page, "광고 켜기/끄기·예산", ads)
 
+    def autolink():
+        # 예시 제품은 이미 연결돼 있으니 하나를 풀고 → 미연결 안내 → 자동 연결 실행
+        page.click("a[data-page=ads]")
+        expect(page.locator("tbody tr")).to_have_count(6)
+        n0 = page.locator("[data-link]").evaluate_all("els => els.filter(e => !e.value).length")
+        i = page.locator("[data-link]").evaluate_all("els => els.findIndex(e => e.value)")
+        page.locator("[data-link]").nth(i).select_option("")
+        expect(page.locator("#toast")).to_contain_text("연결")
+        expect(page.locator("#al-box h2")).to_contain_text(f"미연결 캠페인 {n0 + 1}개", timeout=6000)
+        page.select_option("#al-def", index=1)  # 기본 제품 지정 → 링크로 못 찾는 캠페인도 연결
+        expect(page.locator("#toast")).to_contain_text("기본 제품")
+        page.click("#al-run")
+        expect(page.locator("#al-out")).to_contain_text(f"{n0 + 1}개를 연결", timeout=8000)
+        expect(page.locator("#al-box")).to_have_count(0, timeout=8000)
+        expect(page.locator("td .hint[title]").first).to_contain_text("자동")
+        page.screenshot(path=f"{OUT}/07b-autolink.png", full_page=True)
+    run(page, "캠페인 제품 자동 연결", autolink)
+
     def adanalysis():
         page.click("a[data-page=adanalysis]")
         expect(page.locator("h1")).to_contain_text("광고 분석")

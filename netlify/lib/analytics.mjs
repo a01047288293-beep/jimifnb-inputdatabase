@@ -74,7 +74,7 @@ export function productTable(orders, idx) {
 }
 
 /** 캠페인별 기간 합계 + 연결 제품의 손익분기 ROAS */
-export function campaignSummary(campaigns, rows, links, products) {
+export function campaignSummary(campaigns, rows, links, products, linkSrc = {}) {
   const byId = new Map(products.map(p => [p.id, p]));
   const agg = new Map();
   for (const r of rows) {
@@ -94,7 +94,7 @@ export function campaignSummary(campaigns, rows, links, products) {
       key: k, platform, id: String(id), name: c?.name || a?.name || id, status: c?.status || 'other', dailyBudget: c?.dailyBudget ?? null,
       spend: a?.spend || 0, revenue: a?.revenue || 0, purchases: a?.purchases || 0, clicks: a?.clicks || 0, impressions: a?.impressions || 0,
       roas, cpa: a && a.purchases > 0 ? a.spend / a.purchases : null,
-      productId: p ? pid : null, productName: p ? p.name : null, beRoas: be,
+      productId: p ? pid : null, productName: p ? p.name : null, beRoas: be, linkHow: p ? linkSrc[k]?.how || 'manual' : null,
       verdict: roas == null || be == null ? null : roas >= be * 1.2 ? 'good' : roas >= be ? 'warn' : 'bad'
     });
   };

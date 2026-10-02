@@ -61,8 +61,10 @@ export async function modes() {
 /* ---------- 설정 ---------- */
 export const DEFAULT_SETTINGS = {
   rulesDryRun: true, maxActionsPerDay: 20, minBudget: 10000, maxBudgetChangePct: 50,
-  csWriter: '지미에프앤비', campaignLinks: {}, defaultFeePct: 3.5, shipSlaHours: 48,
-  adPlatforms: { meta: true, google: true, tiktok: true }
+  csWriter: '지미에프앤비', campaignLinks: {}, campaignLinkSrc: {}, defaultFeePct: 3.5, shipSlaHours: 48,
+  adPlatforms: { meta: true, google: true, tiktok: true },
+  // 새 캠페인을 제품에 자동 연결 (광고 링크 상품번호 → 이름 키워드 → 기본 제품)
+  autoLink: { enabled: true, defaultProductId: null }
 };
 // 설정은 요청마다 여러 번 읽히므로 같은 서버 안에서 5초 기억 (저장 시 바로 갱신)
 let settingsMem = null;
@@ -75,8 +77,14 @@ export async function getSettings({ fresh = false } = {}) {
 export async function putSettings(patch, who) {
   const cur = await getSettings({ fresh: true });
   const next = { ...cur };
-  const allowed = ['rulesDryRun', 'maxActionsPerDay', 'minBudget', 'maxBudgetChangePct', 'csWriter', 'defaultFeePct', 'shipSlaHours', 'adPlatforms'];
+  const allowed = ['rulesDryRun', 'maxActionsPerDay', 'minBudget', 'maxBudgetChangePct', 'csWriter', 'defaultFeePct', 'shipSlaHours', 'adPlatforms', 'autoLink'];
   for (const k of allowed) if (k in patch) next[k] = patch[k];
+  if ('autoLink' in patch) {
+    const a = patch.autoLink || {};
+    const pid = a.defaultProductId ? String(a.defaultProductId) : null;
+    if (pid && !(await productExists(pid))) throw new HttpError(400, '기본 제품을 찾지 못했습니다.');
+    next.autoLink = { enabled: a.enabled === undefined ? cur.autoLink?.enabled !== false : Boolean(a.enabled), defaultProductId: pid };
+  }
   if ('adPlatforms' in patch) {
     const ap = {};
     for (const p of PLATFORMS) ap[p] = patch.adPlatforms?.[p] === undefined ? cur.adPlatforms?.[p] !== false : Boolean(patch.adPlatforms[p]);
@@ -91,17 +99,28 @@ export async function putSettings(patch, who) {
   next.csWriter = String(next.csWriter || '').slice(0, 30) || DEFAULT_SETTINGS.csWriter;
   await setJSON('settings', next);
   settingsMem = { at: Date.now(), v: next }; statesMem = null; MODE_MEM.clear();
-  if (who) await addLog({ who, kind: '설정', target: '시스템 설정', detail: allowed.filter(k => k in patch && JSON.stringify(cur[k]) !== JSON.stringify(next[k])).map(k => k === 'adPlatforms' ? `분석 포함 매체: ${PLATFORMS.filter(p => next.adPlatforms[p]).map(p => PLATFORM_LABEL[p]).join('·') || '없음'}` : `${k}: ${cur[k]} → ${next[k]}`).join(', ') || '변경 없음' });
+  if (who) await addLog({ who, kind: '설정', target: '시스템 설정', detail: allowed.filter(k => k in patch && JSON.stringify(cur[k]) !== JSON.stringify(next[k])).map(k => k === 'adPlatforms' ? `분석 포함 매체: ${PLATFORMS.filter(p => next.adPlatforms[p]).map(p => PLATFORM_LABEL[p]).join('·') || '없음'}` : k === 'autoLink' ? `제품 자동 연결: ${next.autoLink.enabled ? '켬' : '끔'}${next.autoLink.defaultProductId ? `, 기본 제품 ${next.autoLink.defaultProductId}` : ''}` : `${k}: ${cur[k]} → ${next[k]}`).join(', ') || '변경 없음' });
   return next;
 }
 export async function setCampaignLink(platform, id, productId, who) {
   const s = await getSettings({ fresh: true });
-  const links = { ...(s.campaignLinks || {}) };
-  if (productId) links[`${platform}:${id}`] = productId; else delete links[`${platform}:${id}`];
-  await setJSON('settings', { ...s, campaignLinks: links });
-  settingsMem = { at: Date.now(), v: { ...s, campaignLinks: links } };
+  const links = { ...(s.campaignLinks || {}) }, src = { ...(s.campaignLinkSrc || {}) };
+  const key = `${platform}:${id}`;
+  if (productId) { links[key] = productId; src[key] = { how: 'manual', at: new Date().toISOString() }; } else { delete links[key]; delete src[key]; }
+  const next = { ...s, campaignLinks: links, campaignLinkSrc: src };
+  await setJSON('settings', next);
+  settingsMem = { at: Date.now(), v: next };
   if (who) await addLog({ who, kind: '광고 연결', target: `${PLATFORM_LABEL[platform]} ${id}`, detail: productId ? `제품 ${productId} 연결` : '연결 해제' });
   return links;
+}
+
+/** 여러 캠페인을 한 번에 연결 (자동 연결용). links: {key: productId}, src: {key: {how, at}} */
+export async function setCampaignLinks(links, src = {}) {
+  const s = await getSettings({ fresh: true });
+  const next = { ...s, campaignLinks: { ...(s.campaignLinks || {}), ...links }, campaignLinkSrc: { ...(s.campaignLinkSrc || {}), ...src } };
+  await setJSON('settings', next);
+  settingsMem = { at: Date.now(), v: next };
+  return next.campaignLinks;
 }
 
 /* ---------- 변경 이력 (월별 묶음) ---------- */
@@ -325,10 +344,23 @@ export async function reply(boardNo, articleNo, title, content, who) {
 
 /* ---------- 광고 ---------- */
 const LIVE = {
-  meta: { campaigns: M.metaCampaigns, rows: M.metaRows, status: M.metaSetStatus, budget: M.metaSetBudget, adRows: M.metaAdRows, adInfo: M.metaAdCreatives, reach: M.metaAdReach },
-  google: { campaigns: G.googleCampaigns, rows: G.googleRowsFull, status: G.googleSetStatus, budget: G.googleSetBudget, adRows: G.googleAdRows, adInfo: G.googleAdCreatives, reach: null },
-  tiktok: { campaigns: T.tiktokCampaigns, rows: T.tiktokRows, status: T.tiktokSetStatus, budget: T.tiktokSetBudget, adRows: null, adInfo: null, reach: null }
+  meta: { campaigns: M.metaCampaigns, rows: M.metaRows, status: M.metaSetStatus, budget: M.metaSetBudget, adRows: M.metaAdRows, adInfo: M.metaAdCreatives, reach: M.metaAdReach, urls: M.metaCampaignUrls },
+  google: { campaigns: G.googleCampaigns, rows: G.googleRowsFull, status: G.googleSetStatus, budget: G.googleSetBudget, adRows: G.googleAdRows, adInfo: G.googleAdCreatives, reach: null, urls: G.googleCampaignUrls },
+  tiktok: { campaigns: T.tiktokCampaigns, rows: T.tiktokRows, status: T.tiktokSetStatus, budget: T.tiktokSetBudget, adRows: null, adInfo: null, reach: null, urls: null }
 };
+/** 캠페인별 광고 랜딩 주소 (제품 자동 연결용), 1시간 캐시 */
+export async function campaignUrls(platform) {
+  const m = await mode(platform);
+  if (m === 'off') return {};
+  if (m === 'demo') return D.demoCampaignUrls ? D.demoCampaignUrls(platform) : {};
+  if (!LIVE[platform].urls) return {};
+  const key = `cache/campurls/${platform}`;
+  const hit = await getJSON(key);
+  if (hit && Date.now() - hit.at < 60 * 60000) return hit.map;
+  const map = await LIVE[platform].urls();
+  await setJSON(key, { at: Date.now(), map });
+  return map;
+}
 // ads2: 퍼널(랜딩·장바구니·결제 시작) 지표가 추가돼 새로 모음
 const AD_CACHE = 'cache/ads2';
 // 광고 데이터는 자동 수집(15분마다)이 미리 받아두므로, 화면에서는 20분 안의 저장본을 그대로 씀

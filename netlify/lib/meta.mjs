@@ -124,6 +124,26 @@ export async function metaAdCreatives() {
   }]));
 }
 
+/** 캠페인별 광고 랜딩 주소 (제품 자동 연결용): {campaignId: [url]} */
+export async function metaCampaignUrls() {
+  const e = env();
+  const q = new URLSearchParams({ fields: 'campaign_id,creative{link_url,object_story_spec,asset_feed_spec}', limit: '50',
+    filtering: JSON.stringify([{ field: 'effective_status', operator: 'IN', value: ['ACTIVE', 'PAUSED', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED', 'WITH_ISSUES'] }]), access_token: e.token });
+  let list;
+  try { list = await getAll(`${base()}/act_${e.acct}/ads?${q}`); } catch (err) { if (tooMuch(err)) return {}; throw err; }
+  const out = {};
+  const walk = (v, acc) => { // 소재 구조 어디에 있어도 http 주소를 모두 모음
+    if (!v) return; if (typeof v === 'string') { if (/^https?:\/\//i.test(v)) acc.add(v); return; }
+    if (Array.isArray(v)) { for (const x of v) walk(x, acc); return; }
+    if (typeof v === 'object') for (const x of Object.values(v)) walk(x, acc);
+  };
+  for (const a of list) {
+    const cid = String(a.campaign_id || ''); if (!cid) continue;
+    const acc = new Set(out[cid] || []); walk(a.creative, acc); out[cid] = [...acc].slice(0, 40);
+  }
+  return out;
+}
+
 async function post(id, params) {
   const body = new URLSearchParams({ ...params, access_token: env().token }).toString();
   return httpJson(`${base()}/${id}`, { method: 'POST', label: '메타', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });

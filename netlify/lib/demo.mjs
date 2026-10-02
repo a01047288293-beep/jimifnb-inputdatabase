@@ -156,6 +156,10 @@ export async function demoCampaigns(platform) {
     return { platform, id: c.id, name: c.name, status: o.status || 'on', dailyBudget: o.budget ?? c.budget, budgetId: null };
   });
 }
+/** 데모 광고의 랜딩 주소 (제품 자동 연결 시험용) */
+export async function demoCampaignUrls(platform) {
+  return Object.fromEntries((DEMO_CAMPAIGNS[platform] || []).filter(c => c.productNo).map(c => [c.id, [`https://demo.example.com/product/${encodeURIComponent(c.name)}/${c.productNo}/category/1/display/1/`]]));
+}
 export async function demoAdRows(platform, from, to) {
   const camps = await demoCampaigns(platform);
   const today = kstDate();

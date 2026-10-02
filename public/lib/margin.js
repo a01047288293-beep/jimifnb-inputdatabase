@@ -124,7 +124,7 @@ function actuals(p, r) {
 
 function blankProduct() {
   return {
-    name: '새 제품', stage: 'idea', category: '', memo: '', checks: {},
+    name: '새 제품', stage: 'idea', category: '', memo: '', adKeywords: '', checks: {},
     ingredients: [{ name: '', unit: 'kg', unitPrice: 0, qty: 0 }],
     yieldPct: 90, packWeightG: 500, packsOverride: 0,
     trials: [],

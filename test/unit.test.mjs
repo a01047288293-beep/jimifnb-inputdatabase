@@ -161,3 +161,42 @@ test('광고 분석: 퍼널은 측정하는 매체끼리, 코멘트 규칙', asy
   const good = AD.comments({ ...AD.sum([{ spend: 100000, impressions: 9000, clicks: 100, purchases: 10, revenue: 600000 }]), beRoas: 3, dailyBudget: 10000, days: 10, kind: 'campaign', status: 'on' });
   assert.equal(good[0].level, 'good'); assert.equal(good[0].action, 'up', '예산 소진 중이면 증액 제안');
 });
+
+// ---- 캠페인 → 제품 자동 연결 ----
+import { productNosFromUrls, planAutoLinks, productKeywords } from '../netlify/lib/autolink.mjs';
+test('자동 연결: 광고 링크에서 카페24 상품번호를 뽑는다', () => {
+  const nos = productNosFromUrls(['https://shop.com/product/한우-불고기/101/category/24/display/1/', 'https://shop.com/product/detail.html?product_no=102&cate_no=1', 'https://shop.com/surl/P/103', 'https://shop.com/']);
+  assert.deepEqual(nos.sort(), [101, 102, 103]);
+});
+test('자동 연결: 링크 → 키워드 → 기본 제품 순서로 찾고, 겹치면 보류한다', () => {
+  const products = [
+    { id: 'p1', name: '한우 불고기 양념육', cafe24ProductNos: [101], adKeywords: 'BG' },
+    { id: 'p2', name: '소고기 육포', cafe24ProductNos: [102], adKeywords: '' },
+    { id: 'p3', name: '선물세트', cafe24ProductNos: [], adKeywords: '추석, 선물' }
+  ];
+  const campaigns = [
+    { platform: 'meta', id: '1', name: '[상위]260512' },           // 링크로
+    { platform: 'meta', id: '2', name: '[신규]BG_영상' },           // 키워드 BG
+    { platform: 'google', id: '3', name: '추석 선물세트 검색' },     // 키워드 (가장 긴 '선물세트'=p3, '선물'도 p3)
+    { platform: 'google', id: '4', name: '[이미지상위]260528' },     // 아무것도 없음 → 기본 제품
+    { platform: 'meta', id: '5', name: '이미 연결됨' },
+    { platform: 'meta', id: '6', name: '불고기 육포 세트' }          // 두 제품 키워드 길이 같음? 불고기(3) vs 육포(2) → 불고기 승
+  ];
+  const urls = { meta: { 1: ['https://shop.com/product/x/101/category/1/'] } };
+  const r = planAutoLinks({ campaigns, products, links: { 'meta:5': 'p2' }, urls, settings: { autoLink: { enabled: true, defaultProductId: 'p1' } } });
+  const by = Object.fromEntries(r.plan.map(p => [p.key, p]));
+  assert.equal(by['meta:1'].productId, 'p1'); assert.equal(by['meta:1'].how, 'url');
+  assert.equal(by['meta:2'].productId, 'p1'); assert.equal(by['meta:2'].how, 'keyword');
+  assert.equal(by['google:3'].productId, 'p3');
+  assert.equal(by['google:4'].how, 'default');
+  assert.equal(by['meta:6'].productId, 'p1');
+  assert.ok(!by['meta:5']);
+  assert.equal(r.unresolved.length, 0);
+  // 기본 제품 없으면 미해결
+  const r2 = planAutoLinks({ campaigns: [campaigns[3]], products, settings: {} });
+  assert.equal(r2.plan.length, 0); assert.equal(r2.unresolved.length, 1);
+  // 제품이 하나뿐이면 전부 그 제품
+  const r3 = planAutoLinks({ campaigns: [campaigns[3]], products: [products[1]], settings: {} });
+  assert.equal(r3.plan[0].how, 'single');
+  assert.deepEqual(productKeywords(products[2]), ['추석', '선물', '선물세트']);
+});
